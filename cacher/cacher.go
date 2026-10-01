@@ -247,12 +247,25 @@ func (c *Cacher) maintRelease(ctx context.Context, p string, withGPG bool) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ch1 := c.Download(p, nil)
-			if withGPG {
-				ch2 := c.Download(p+".gpg", nil)
-				<-ch2
+			ch := c.Download(p, nil)
+			if ch == nil {
+				// the prefix of p was removed from the mapping.
+				log.Warn("stop maintaining unmapped meta data", map[string]interface{}{
+					"path": p,
+				})
+				return
 			}
-			<-ch1
+			chs := []<-chan struct{}{ch}
+			if withGPG {
+				chs = append(chs, c.Download(p+".gpg", nil))
+			}
+			for _, ch := range chs {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ch:
+				}
+			}
 		}
 	}
 }

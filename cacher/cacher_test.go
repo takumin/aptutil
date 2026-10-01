@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -162,5 +163,25 @@ func TestNewCacherNegativeMaxConns(t *testing.T) {
 	config.MaxConns = -1
 	if _, err := NewCacher(config); err == nil {
 		t.Error("NewCacher must fail with negative max_conns")
+	}
+}
+
+func TestCacherMaintReleaseUnmapped(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCacher(t, "http://example.com")
+	c.checkInterval = 10 * time.Millisecond
+
+	done := make(chan struct{})
+	go func() {
+		// the prefix "gone" was removed from the mapping.
+		c.maintRelease(context.Background(), "gone/dists/noble/InRelease", false)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("maintRelease did not stop for an unmapped path")
 	}
 }

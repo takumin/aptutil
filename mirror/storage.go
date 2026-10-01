@@ -144,27 +144,41 @@ func (s *Storage) StoreLink(fi *apt.FileInfo, fullpath string) error {
 	return os.Link(fullpath, fp)
 }
 
+// byHashPaths returns the by-hash paths of fi, strongest first.
+// Paths for checksums that fi does not have are omitted.
+func byHashPaths(fi *apt.FileInfo) []string {
+	var l []string
+	for _, p := range []string{fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
+		if p != "" {
+			l = append(l, p)
+		}
+	}
+	return l
+}
+
+// byHashPath returns the strongest by-hash path of fi,
+// or an empty string if fi has no checksum.
+func byHashPath(fi *apt.FileInfo) string {
+	l := byHashPaths(fi)
+	if len(l) == 0 {
+		return ""
+	}
+	return l[0]
+}
+
 // StoreLinkWithHash stores a hard link to a file into this storage
 // with additional hard links for by-hash retrieval.
 func (s *Storage) StoreLinkWithHash(fi *apt.FileInfo, fullpath string) error {
 	p := fi.Path()
-	md5p := fi.MD5SumPath()
-	sha1p := fi.SHA1Path()
-	sha256p := fi.SHA256Path()
-	fpl := []string{
-		filepath.Join(s.dir, s.prefix, filepath.Clean(p)),
-		filepath.Join(s.dir, s.prefix, filepath.Clean(md5p)),
-		filepath.Join(s.dir, s.prefix, filepath.Clean(sha1p)),
-		filepath.Join(s.dir, s.prefix, filepath.Clean(sha256p)),
-	}
+	hashPaths := byHashPaths(fi)
 
+	var fpl []string
 	s.mu.Lock()
-	_, ok := s.info[p]
-	if ok {
-		// ignore the canonical path because another file was already stored.
-		fpl = fpl[1:]
-	} else {
+	if _, ok := s.info[p]; !ok {
+		// otherwise ignore the canonical path because another file
+		// was already stored.
 		s.info[p] = fi
+		fpl = append(fpl, filepath.Join(s.dir, s.prefix, filepath.Clean(p)))
 	}
 
 	// This may overwrite existing entries in s.info if another item
@@ -174,9 +188,10 @@ func (s *Storage) StoreLinkWithHash(fi *apt.FileInfo, fullpath string) error {
 	//
 	// Although we may fix the problem in Storage.Lookup, at this point
 	// we leave it as it is not too bad.
-	s.info[md5p] = fi
-	s.info[sha1p] = fi
-	s.info[sha256p] = fi
+	for _, hp := range hashPaths {
+		s.info[hp] = fi
+		fpl = append(fpl, filepath.Join(s.dir, s.prefix, filepath.Clean(hp)))
+	}
 	s.mu.Unlock()
 
 	for _, fp := range fpl {
@@ -209,8 +224,8 @@ func (s *Storage) Lookup(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, string) 
 		return fi2, filepath.Join(s.dir, s.prefix, filepath.Clean(p))
 	}
 
-	if byhash {
-		fi2, fullpath := f(fi.SHA256Path())
+	if hp := byHashPath(fi); byhash && hp != "" {
+		fi2, fullpath := f(hp)
 		if fi2 != nil {
 			return fi2, fullpath
 		}

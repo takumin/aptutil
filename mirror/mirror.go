@@ -159,11 +159,11 @@ func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap map[string][]*ap
 		if !m.mc.MatchingIndex(p) || !apt.IsSupported(p) {
 			continue
 		}
-		hashPath := p
-		if byhash {
-			hashPath = index.SHA256Path()
+		openPath := p
+		if hp := byHashPath(index); byhash && hp != "" {
+			openPath = hp
 		}
-		f, err := m.storage.Open(hashPath)
+		f, err := m.storage.Open(openPath)
 		if err != nil {
 			return err
 		}
@@ -342,9 +342,7 @@ func (m *Mirror) download(ctx context.Context,
 	var retries uint
 	targets := []string{p}
 	if byhash && fi != nil {
-		targets = append(targets, fi.SHA256Path())
-		targets = append(targets, fi.SHA1Path())
-		targets = append(targets, fi.MD5SumPath())
+		targets = append(targets, byHashPaths(fi)...)
 	}
 
 RETRY:

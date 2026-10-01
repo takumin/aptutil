@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cybozu-go/log"
@@ -24,7 +25,8 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := path.Clean(r.URL.Path[1:])
+	// r.URL.Path is empty for a request such as "GET http://host HTTP/1.1".
+	p := path.Clean(strings.TrimPrefix(r.URL.Path, "/"))
 
 	if log.Enabled(log.LvDebug) {
 		log.Debug("request path", map[string]interface{}{

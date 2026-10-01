@@ -185,3 +185,27 @@ func TestCacherMaintReleaseUnmapped(t *testing.T) {
 		t.Fatal("maintRelease did not stop for an unmapped path")
 	}
 }
+
+func TestCacherResultInvalidation(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	c.cachePeriod = 300 * time.Millisecond
+
+	const p = "ubuntu/pool/a.deb"
+	<-c.Download(p, nil)
+	time.Sleep(150 * time.Millisecond)
+	<-c.Download(p, nil)
+
+	// the result of the first download expires, but the second does not.
+	time.Sleep(200 * time.Millisecond)
+	c.dlLock.Lock()
+	_, ok := c.results[p]
+	c.dlLock.Unlock()
+	if !ok {
+		t.Error("the result of the newer download was invalidated")
+	}
+}

@@ -56,10 +56,18 @@ type Cacher struct {
 
 	dlLock     sync.RWMutex
 	dlChannels map[string]chan struct{}
-	results    map[string]int
+	results    map[string]*dlStatus
 
 	hostLock sync.Mutex
 	hostSem  map[string]chan struct{}
+}
+
+// dlStatus is the HTTP status code of a finished download.
+//
+// It is referenced by pointer so that the timer to invalidate it
+// does not remove a newer one.
+type dlStatus struct {
+	code int
 }
 
 // NewCacher constructs Cacher.
@@ -136,7 +144,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		listed:        make(map[string][]string),
 		refs:          make(map[string]int),
 		dlChannels:    make(map[string]chan struct{}),
-		results:       make(map[string]int),
+		results:       make(map[string]*dlStatus),
 		hostSem:       make(map[string]chan struct{}),
 	}
 
@@ -317,10 +325,11 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 
 	defer func() {
 		c.releaseSemaphore(u.Host)
+		status := &dlStatus{code: statusCode}
 		c.dlLock.Lock()
 		ch := c.dlChannels[p]
 		delete(c.dlChannels, p)
-		c.results[p] = statusCode
+		c.results[p] = status
 		c.dlLock.Unlock()
 		close(ch)
 
@@ -332,7 +341,10 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 			case <-time.After(c.cachePeriod):
 			}
 			c.dlLock.Lock()
-			delete(c.results, p)
+			// keep the result of a newer download.
+			if c.results[p] == status {
+				delete(c.results, p)
+			}
 			c.dlLock.Unlock()
 			return nil
 		})
@@ -553,8 +565,8 @@ RETRY:
 	result, resultOk := c.results[p]
 	c.dlLock.RUnlock()
 
-	if resultOk && result != http.StatusOK {
-		return result, nil, nil
+	if resultOk && result.code != http.StatusOK {
+		return result.code, nil, nil
 	}
 	if chOk {
 		<-ch

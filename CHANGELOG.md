@@ -36,6 +36,7 @@ All notable changes to this project will be documented in this file.
   for invalid by-hash paths.
 - [mirror] Failures to flush `info.json` were ignored, which could leave
   a truncated index.
+- [mirror] A broken symlink in `dir` stopped removing old mirrors.
 - [mirror] Failed responses stayed open across retries, and the retry
   backoff could not be interrupted by cancellation.
 

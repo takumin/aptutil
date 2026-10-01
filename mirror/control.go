@@ -66,11 +66,16 @@ func gc(ctx context.Context, c *Config) error {
 		if (dentry.Type() & os.ModeSymlink) == 0 {
 			continue
 		}
+		using[dentry.Name()] = true
 		p, err := filepath.EvalSymlinks(filepath.Join(c.Dir, dentry.Name()))
 		if err != nil {
-			return errors.Wrap(err, "gc")
+			// a broken symlink should not stop removing other old mirrors.
+			log.Warn("gc: failed to resolve a symlink", map[string]interface{}{
+				"path":  filepath.Join(c.Dir, dentry.Name()),
+				"error": err.Error(),
+			})
+			continue
 		}
-		using[dentry.Name()] = true
 		using[filepath.Base(filepath.Dir(p))] = true
 	}
 

@@ -54,12 +54,27 @@ type Cacher struct {
 	listed map[string][]string
 	refs   map[string]int
 
-	dlLock     sync.RWMutex
-	dlChannels map[string]chan struct{}
-	results    map[string]*dlStatus
+	dlLock  sync.Mutex
+	dlTasks map[string]*dlTask
+	results map[string]*dlStatus
 
 	hostLock sync.Mutex
 	hostSem  map[string]chan struct{}
+}
+
+// dlTask represents an in-flight download of an item.
+type dlTask struct {
+	// done is closed when the download finishes.
+	done chan struct{}
+
+	// uncached is the path of the downloaded file that is too large to
+	// be cached.  It is set before done is closed, and removed when
+	// all the holders of the task released it.
+	uncached string
+
+	// refs counts the holders of the task: the downloading goroutine
+	// and Get callers waiting for it.  It is guarded by Cacher.dlLock.
+	refs int
 }
 
 // dlStatus is the HTTP status code of a finished download.
@@ -143,7 +158,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		info:          make(map[string]*apt.FileInfo),
 		listed:        make(map[string][]string),
 		refs:          make(map[string]int),
-		dlChannels:    make(map[string]chan struct{}),
+		dlTasks:       make(map[string]*dlTask),
 		results:       make(map[string]*dlStatus),
 		hostSem:       make(map[string]chan struct{}),
 	}
@@ -295,30 +310,57 @@ func closeRespBody(r *http.Response) {
 // Users of this method should retry if the item is not cached
 // or invalidated.
 func (c *Cacher) Download(p string, valid *apt.FileInfo) <-chan struct{} {
+	c.dlLock.Lock()
+	defer c.dlLock.Unlock()
+
+	t := c.startDownload(p, valid)
+	if t == nil {
+		return nil
+	}
+	return t.done
+}
+
+// startDownload starts downloading p unless it is already in progress,
+// and returns the task for it.  If prefix of p is not registered
+// in URLMap, nil is returned.
+//
+// c.dlLock must be held.
+func (c *Cacher) startDownload(p string, valid *apt.FileInfo) *dlTask {
 	u := c.um.URL(p)
 	if u == nil {
 		return nil
 	}
 
-	c.dlLock.Lock()
-	defer c.dlLock.Unlock()
-
-	ch, ok := c.dlChannels[p]
+	t, ok := c.dlTasks[p]
 	if ok {
-		return ch
+		return t
 	}
 
-	ch = make(chan struct{})
-	c.dlChannels[p] = ch
+	// the downloading goroutine holds the task until it finishes.
+	t = &dlTask{done: make(chan struct{}), refs: 1}
+	c.dlTasks[p] = t
 	well.Go(func(ctx context.Context) error {
-		c.download(ctx, p, u, valid)
+		c.download(ctx, p, u, valid, t)
 		return nil
 	})
-	return ch
+	return t
+}
+
+// releaseTask releases t, and removes its uncached file if t is
+// no longer held by anyone.
+func (c *Cacher) releaseTask(t *dlTask) {
+	c.dlLock.Lock()
+	t.refs--
+	refs := t.refs
+	c.dlLock.Unlock()
+
+	if refs == 0 && t.uncached != "" {
+		_ = os.Remove(t.uncached)
+	}
 }
 
 // download is a goroutine to download an item.
-func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.FileInfo) {
+func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.FileInfo, t *dlTask) {
 	c.acquireSemaphore(u.Host)
 
 	statusCode := http.StatusInternalServerError
@@ -327,11 +369,11 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		c.releaseSemaphore(u.Host)
 		status := &dlStatus{code: statusCode}
 		c.dlLock.Lock()
-		ch := c.dlChannels[p]
-		delete(c.dlChannels, p)
+		delete(c.dlTasks, p)
 		c.results[p] = status
 		c.dlLock.Unlock()
-		close(ch)
+		close(t.done)
+		c.releaseTask(t)
 
 		// invalidate result cache after some interval
 		well.Go(func(ctx context.Context) error {
@@ -401,9 +443,12 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		})
 		return
 	}
+	keepTempfile := false
 	defer func() {
 		_ = tempfile.Close()
-		_ = os.Remove(tempfile.Name())
+		if !keepTempfile {
+			_ = os.Remove(tempfile.Name())
+		}
 	}()
 
 	fi, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)
@@ -461,7 +506,19 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	// both have the same set of FileInfo, storage.Insert need to be
 	// guarded by c.fiLock.
 	err = storage.Insert(tempfile.Name(), fi)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrTooLarge):
+		// Hand the downloaded file over to the waiters in Get
+		// without caching it.
+		log.Warn("serving an item without caching as it exceeds cache_capacity", map[string]interface{}{
+			"path": p,
+			"size": fi.Size(),
+		})
+		t.uncached = tempfile.Name()
+		keepTempfile = true
+		statusCode = http.StatusOK
+		return
+	case err != nil:
 		// Storage stays consistent with c.info even if Insert fails;
 		// the item is just not cached and will be downloaded again.
 		log.Error("could not save an item", map[string]interface{}{
@@ -527,7 +584,8 @@ func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
 //
 // The return values are cached HTTP status code of the response from
 // an upstream server, a pointer to os.File for the cache file,
-// and error.
+// and error.  If the item is too large to be cached, the returned
+// os.File is the downloaded file that is not cached.
 //
 // If ctx is canceled while waiting for the download, Get returns
 // ctx.Err().  The download itself continues for other callers.
@@ -566,18 +624,37 @@ RETRY:
 	}
 
 	// not found in storage.
-	c.dlLock.RLock()
-	result, resultOk := c.results[p]
-	c.dlLock.RUnlock()
-
-	if resultOk && result.code != http.StatusOK {
+	c.dlLock.Lock()
+	if result, ok := c.results[p]; ok && result.code != http.StatusOK {
+		c.dlLock.Unlock()
 		return result.code, nil, nil
 	}
-	// Download returns the channel for the download in progress, if any.
+	t := c.startDownload(p, fi)
+	t.refs++
+	c.dlLock.Unlock()
+
 	select {
 	case <-ctx.Done():
+		c.releaseTask(t)
 		return http.StatusServiceUnavailable, nil, ctx.Err()
-	case <-c.Download(p, fi):
+	case <-t.done:
 	}
-	goto RETRY
+
+	if t.uncached == "" {
+		c.releaseTask(t)
+		goto RETRY
+	}
+
+	// The file is opened before releasing t so that it is not
+	// removed meanwhile.
+	f, err = os.Open(t.uncached)
+	c.releaseTask(t)
+	if err != nil {
+		log.Error("failed to open an uncached item", map[string]interface{}{
+			"path":  p,
+			"error": err.Error(),
+		})
+		return http.StatusInternalServerError, nil, err
+	}
+	return http.StatusOK, f, nil
 }

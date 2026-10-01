@@ -197,11 +197,39 @@ func testStorageInsertPurgesFilesAllowingLRU(t *testing.T) {
 	}
 }
 
+func testStorageInsertRejectsTooLarge(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cm := newTestStorage(t, dir, 3)
+
+	fiA, err := insert(cm, []byte("ab"), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// an item larger than the capacity would be evicted immediately
+	// after evicting all other items.
+	_, err = insert(cm, []byte("abcd"), "b")
+	if !errors.Is(err, ErrTooLarge) {
+		t.Errorf("err = %v, want ErrTooLarge", err)
+	}
+
+	f, err := cm.Lookup(fiA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if cm.Len() != 1 {
+		t.Errorf("cm.Len() = %d, want 1", cm.Len())
+	}
+}
+
 func TestStorageInsert(t *testing.T) {
 	t.Run("Storage.Insert should insert file", testStorageInsertWorksCorrectly)
 	t.Run("Storage.Insert should overwrite", testStorageInsertOverwrite)
 	t.Run("Storage.Insert should return error if passed FileInfo path is bad path", testStorageInsertReturnsErrorAgainstBadPath)
 	t.Run("Storage.Insert should purge files allowing LRU", testStorageInsertPurgesFilesAllowingLRU)
+	t.Run("Storage.Insert should reject items larger than capacity", testStorageInsertRejectsTooLarge)
 }
 
 func TestNewStorage(t *testing.T) {

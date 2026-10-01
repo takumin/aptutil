@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -276,10 +277,100 @@ func TestCacherGetCanceled(t *testing.T) {
 
 	// the download continues; wait for it before removing the directories.
 	c.dlLock.Lock()
-	ch := c.dlChannels[p]
+	task := c.dlTasks[p]
 	c.dlLock.Unlock()
 	close(release)
-	if ch != nil {
-		<-ch
+	if task != nil {
+		<-task.done
+	}
+}
+
+// tempFiles returns the temporary files left in dir.
+func tempFiles(t *testing.T, dir string) []string {
+	t.Helper()
+
+	l, err := filepath.Glob(filepath.Join(dir, "_tmp*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func TestCacherGetTooLarge(t *testing.T) {
+	t.Parallel()
+
+	const body = "0123456789"
+	var hits atomic.Int64
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-release
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	c.items.capacity = 4 // smaller than the item
+
+	const p = "ubuntu/pool/big.deb"
+	type result struct {
+		status int
+		data   string
+		err    error
+	}
+	const waiters = 2
+	done := make(chan result, waiters)
+	for i := 0; i < waiters; i++ {
+		go func() {
+			status, f, err := c.Get(context.Background(), p)
+			if f == nil {
+				done <- result{status, "", err}
+				return
+			}
+			defer func() { _ = f.Close() }()
+			data, err := io.ReadAll(f)
+			done <- result{status, string(data), err}
+		}()
+	}
+
+	// let both waiters join the same download.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c.dlLock.Lock()
+		task := c.dlTasks[p]
+		joined := task != nil && task.refs == waiters+1
+		c.dlLock.Unlock()
+		if joined {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("waiters did not join the download")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+
+	for i := 0; i < waiters; i++ {
+		select {
+		case r := <-done:
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			if r.status != http.StatusOK || r.data != body {
+				t.Errorf("status = %d, data = %q, want %d, %q", r.status, r.data, http.StatusOK, body)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Get did not return")
+		}
+	}
+
+	if n := hits.Load(); n != 1 {
+		t.Errorf("upstream hits = %d, want 1", n)
+	}
+	if n := c.items.Len(); n != 0 {
+		t.Errorf("cached items = %d, want 0", n)
+	}
+	if l := tempFiles(t, c.items.dir); len(l) != 0 {
+		t.Errorf("temporary files are left: %v", l)
 	}
 }

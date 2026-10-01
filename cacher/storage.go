@@ -22,6 +22,10 @@ var (
 
 	// ErrBadPath is returned by Storage.Insert if path is bad
 	ErrBadPath = errors.New("bad path")
+
+	// ErrTooLarge is returned by Storage.Insert if the item is larger
+	// than the capacity of the storage.
+	ErrTooLarge = errors.New("too large")
 )
 
 // entry represents an item in the cache.
@@ -54,12 +58,6 @@ type Storage struct {
 	lclock uint64   // ditto
 }
 
-// NewStorage creates a Storage.
-//
-// dir is the directory for cached items.
-// capacity is the maximum total size (bytes) of items in the cache.
-// If capacity is zero, items will not be evicted.
-// Non-existing directories will be created.
 // NewStorage creates a Storage.
 //
 // dir is the directory for cached items.
@@ -200,6 +198,9 @@ func (cm *Storage) TempFile() (*os.File, error) {
 //
 // fi.Path() must be as clean as filepath.Clean() and
 // must not be filepath.IsAbs().
+//
+// If fi is larger than the capacity, ErrTooLarge is returned
+// as the item would be evicted immediately.
 func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	p := fi.Path()
 	switch {
@@ -208,6 +209,8 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	case !apt.IsSafePath(p):
 		// reject paths that escape the cache root via "..".
 		return ErrBadPath
+	case cm.capacity > 0 && fi.Size() > cm.capacity:
+		return ErrTooLarge
 	}
 
 	destpath := filepath.Join(cm.dir, p+fileSuffix)

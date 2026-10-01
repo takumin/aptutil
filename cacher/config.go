@@ -14,11 +14,11 @@ const (
 //
 // Use https://github.com/BurntSushi/toml as follows:
 //
-//    config := cacher.NewConfig()
-//    md, err := toml.DecodeFile("/path/to/config.toml", config)
-//    if err != nil {
-//        ...
-//    }
+//	config := cacher.NewConfig()
+//	md, err := toml.DecodeFile("/path/to/config.toml", config)
+//	if err != nil {
+//	    ...
+//	}
 type Config struct {
 	// Addr is the listening address of HTTP server.
 	//

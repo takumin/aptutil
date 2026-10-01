@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/cybozu-go/aptutil/apt"
@@ -14,6 +15,9 @@ import (
 
 const (
 	fileSuffix = ".cache"
+
+	// tempPrefix is the prefix of temporary files created by TempFile.
+	tempPrefix = "_tmp"
 )
 
 var (
@@ -135,7 +139,8 @@ func (cm *Storage) maint() {
 	}
 }
 
-// Load loads existing items in filesystem.
+// Load loads existing items in filesystem, and removes temporary files
+// left by TempFile.
 func (cm *Storage) Load() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -151,7 +156,20 @@ func (cm *Storage) Load() error {
 		if err != nil {
 			return err
 		}
-		if filepath.Ext(subpath) != fileSuffix {
+		isCache := filepath.Ext(subpath) == fileSuffix
+		if !isCache && filepath.Dir(subpath) == "." && strings.HasPrefix(subpath, tempPrefix) {
+			// A temporary file left by a download interrupted by
+			// a crash.  Nobody uses it, and it is not counted in
+			// the capacity, so remove it to reclaim the space.
+			if err := os.Remove(path); err != nil { //nolint:gosec // G122: path is directly under cm.dir, and Remove does not follow symlinks
+				return err
+			}
+			log.Info("removed a stale temporary file", map[string]interface{}{
+				"path": path,
+			})
+			return nil
+		}
+		if !isCache {
 			return nil
 		}
 		subpath = subpath[:len(subpath)-len(fileSuffix)]
@@ -191,7 +209,7 @@ func (cm *Storage) Load() error {
 // opens the file for reading and writing,
 // and returns the resulting *os.File.
 func (cm *Storage) TempFile() (*os.File, error) {
-	return os.CreateTemp(cm.dir, "_tmp")
+	return os.CreateTemp(cm.dir, tempPrefix)
 }
 
 // Insert inserts or updates a cache item.

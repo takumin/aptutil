@@ -359,6 +359,49 @@ func TestStorageLoad(t *testing.T) {
 	}
 }
 
+func TestStorageLoadRemovesTempFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := newTestStorage(t, dir, 0)
+
+	// a temporary file left by an interrupted download.
+	f, err := cm.TempFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("partial")); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	// items whose names begin with the prefix are not temporary files.
+	items := []string{"_tmpitem", filepath.Join("ubuntu", "_tmpitem")}
+	for _, p := range items {
+		fp := filepath.Join(dir, p+fileSuffix)
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte{'a'}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := cm.Load(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(f.Name()); !os.IsNotExist(err) {
+		t.Errorf("temporary file is not removed: %v", err)
+	}
+	if l := cm.ListAll(); len(l) != len(items) {
+		t.Errorf("len(ListAll()) = %d, want %d", len(l), len(items))
+	}
+	if cm.used != uint64(len(items)) {
+		t.Errorf("used = %d, want %d", cm.used, len(items))
+	}
+}
+
 func TestStorageLookupCalculatesChecksums(t *testing.T) {
 	t.Parallel()
 

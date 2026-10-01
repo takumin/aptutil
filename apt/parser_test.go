@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -177,5 +179,42 @@ func TestParserPackages(t *testing.T) {
 	_, err = p.Read()
 	if !errors.Is(err, io.EOF) {
 		t.Error(`err != io.EOF`)
+	}
+}
+
+func TestParserParagraphSeparators(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		input string
+	}{
+		{"single empty line", "A: 1\n\nA: 2\n"},
+		{"multiple empty lines", "A: 1\n\n\n\nA: 2\n"},
+		{"leading empty lines", "\n\nA: 1\n\nA: 2\n"},
+		{"trailing empty lines", "A: 1\n\nA: 2\n\n\n"},
+		{"whitespace-only lines", "A: 1\n \t\n\t\nA: 2\n"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := NewParser(strings.NewReader(tc.input))
+			var got []string
+			for {
+				d, err := p.Read()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, d["A"]...)
+			}
+			if want := []string{"1", "2"}; !slices.Equal(got, want) {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		})
 	}
 }

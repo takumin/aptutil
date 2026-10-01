@@ -62,7 +62,13 @@ func (p *Parser) Read() (Paragraph, error) {
 L:
 	for p.s.Scan() {
 		switch l := p.s.Text(); {
-		case len(l) == 0:
+		case strings.Trim(l, " \t") == "":
+			// Paragraphs are separated by one or more empty lines.
+			// Lines consisting solely of spaces and tabs are
+			// treated as empty as Debian policy 5.1 allows.
+			if len(ret) == 0 {
+				continue
+			}
 			break L
 		case l[0] == '#':
 			continue

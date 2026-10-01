@@ -525,7 +525,10 @@ func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
 // The return values are cached HTTP status code of the response from
 // an upstream server, a pointer to os.File for the cache file,
 // and error.
-func (c *Cacher) Get(p string) (statusCode int, f *os.File, err error) {
+//
+// If ctx is canceled while waiting for the download, Get returns
+// ctx.Err().  The download itself continues for other callers.
+func (c *Cacher) Get(ctx context.Context, p string) (statusCode int, f *os.File, err error) {
 	u := c.um.URL(p)
 	if u == nil {
 		return http.StatusNotFound, nil, nil
@@ -561,17 +564,17 @@ RETRY:
 
 	// not found in storage.
 	c.dlLock.RLock()
-	ch, chOk := c.dlChannels[p]
 	result, resultOk := c.results[p]
 	c.dlLock.RUnlock()
 
 	if resultOk && result.code != http.StatusOK {
 		return result.code, nil, nil
 	}
-	if chOk {
-		<-ch
-	} else {
-		<-c.Download(p, fi)
+	// Download returns the channel for the download in progress, if any.
+	select {
+	case <-ctx.Done():
+		return http.StatusServiceUnavailable, nil, ctx.Err()
+	case <-c.Download(p, fi):
 	}
 	goto RETRY
 }

@@ -3,6 +3,7 @@ package cacher
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -51,7 +52,7 @@ func TestCacherGetChecksumMismatch(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		status, f, err := c.Get(p)
+		status, f, err := c.Get(context.Background(), p)
 		if f != nil {
 			_ = f.Close()
 		}
@@ -207,5 +208,49 @@ func TestCacherResultInvalidation(t *testing.T) {
 	c.dlLock.Unlock()
 	if !ok {
 		t.Error("the result of the newer download was invalidated")
+	}
+}
+
+func TestCacherGetCanceled(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	const p = "ubuntu/pool/a.deb"
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, f, err := c.Get(ctx, p)
+		if f != nil {
+			_ = f.Close()
+		}
+		done <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get did not return after cancel")
+	}
+
+	// the download continues; wait for it before removing the directories.
+	c.dlLock.Lock()
+	ch := c.dlChannels[p]
+	c.dlLock.Unlock()
+	close(release)
+	if ch != nil {
+		<-ch
 	}
 }

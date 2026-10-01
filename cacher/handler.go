@@ -34,7 +34,7 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	status, f, err := c.Get(p)
+	status, f, err := c.Get(r.Context(), p)
 
 	switch {
 	case err != nil:

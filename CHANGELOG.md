@@ -3,12 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [1.5.0] - 2026-10-01
 ### Added
 - Publish prebuilt binaries for linux/amd64 and linux/arm64 on GitHub
   Releases, with SHA256 checksums, cosign signatures and build provenance.
 
 ### Changed
-- Require Go 1.26 or later, and update dependencies.
+- Require Go 1.27 or later, and update dependencies.
 - Calculate MD5, SHA1, and SHA256 checksums of downloaded files
   concurrently, which almost doubles the throughput of calculating them.
 - [mirror] `max_conns = 0` now means no limit as documented; negative
@@ -196,7 +198,8 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/takumin/aptutil/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/takumin/aptutil/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/cybozu-go/aptutil/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/cybozu-go/aptutil/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/cybozu-go/aptutil/compare/v1.4.0...v1.4.1

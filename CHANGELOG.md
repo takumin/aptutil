@@ -50,6 +50,17 @@ All notable changes to this project will be documented in this file.
 - [mirror] A download hung forever, holding the lock file, when an
   upstream server stopped sending data; it is now aborted and retried
   after a minute without progress.
+- [mirror] Indices reused from the previous mirror got bogus by-hash
+  links such as `by-hash/SHA1` for checksums missing in Release.
+- [cacher] A download from an upstream server that stopped sending data
+  held a connection slot for up to 30 minutes, blocking other downloads
+  from the server; it is now aborted after a minute without progress
+  and reported as 504.  Downloads that keep progressing are no longer
+  aborted after 30 minutes.
+- [cacher] HEAD requests kept waiting for a connection slot after
+  clients disconnected.
+- [cacher] Temporary files left by downloads interrupted by a crash were
+  never removed; they are now removed at startup.
 - Paragraphs after consecutive empty lines in indices were silently
   ignored, so go-apt-mirror missed the packages listed in them.
   Lines consisting solely of spaces and tabs are also treated as empty.

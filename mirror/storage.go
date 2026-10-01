@@ -94,15 +94,24 @@ func (s *Storage) Save() error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	enc := json.NewEncoder(f)
 	err = enc.Encode(s.info)
 	if err != nil {
+		_ = f.Close()
 		return err
 	}
 
-	f.Sync()
+	err = f.Sync()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+
 	err = DirSyncTree(s.dir)
 	if err != nil {
 		return errors.Wrap(err, "DirSyncTree(s.dir)")

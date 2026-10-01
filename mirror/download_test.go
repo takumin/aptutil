@@ -2,12 +2,14 @@ package mirror
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newTestMirror(t *testing.T, upstream string) *Mirror {
@@ -74,5 +76,36 @@ func TestMirrorDownloadReusesConnectionOnRetry(t *testing.T) {
 	// so that the connection is reused.
 	if n := conns.Load(); n != 1 {
 		t.Errorf("connections = %d, want 1", n)
+	}
+}
+
+func TestMirrorDownloadCancelDuringBackoff(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	m := newTestMirror(t, srv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan *dlResult, 1)
+	go m.download(ctx, "a", nil, false, ch)
+
+	// the first retry waits for 1 second; cancel while waiting.
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	cancel()
+
+	select {
+	case r := <-ch:
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Errorf("download returned %v after cancel", elapsed)
+		}
+		if !errors.Is(r.err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("download did not return")
 	}
 }

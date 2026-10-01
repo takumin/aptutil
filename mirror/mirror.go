@@ -340,7 +340,12 @@ RETRY:
 			"repo": m.id,
 			"path": p,
 		})
-		time.Sleep(time.Duration(1<<(retries-1)) * time.Second)
+		select {
+		case <-ctx.Done():
+			r.err = ctx.Err()
+			return
+		case <-time.After(time.Duration(1<<(retries-1)) * time.Second):
+		}
 	}
 
 	// imitation apt-get command

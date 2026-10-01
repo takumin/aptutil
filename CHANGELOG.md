@@ -3,6 +3,45 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+- Publish prebuilt binaries for linux/amd64 and linux/arm64 on GitHub
+  Releases, with SHA256 checksums, cosign signatures and build provenance.
+
+### Changed
+- Require Go 1.26 or later, and update dependencies.
+- [mirror] `max_conns = 0` now means no limit as documented; negative
+  `max_conns` is rejected by both commands instead of panicking.
+- [cacher] Error responses no longer include internal error details;
+  they are logged instead.
+- [cacher] Keep idle upstream connections up to `max_conns`.
+
+### Fixed
+- [cacher] A downloaded item that failed checksum validation was treated
+  as success and re-downloaded in a tight loop; it is now reported as 502.
+- [cacher] Items larger than `cache_capacity` were evicted right after
+  being cached and re-downloaded endlessly; they are now served without
+  being cached.
+- [cacher] Memory grew without bound because file info entries of
+  superseded packages were never removed.
+- [cacher] Calculating checksums of items loaded at startup read whole
+  files into memory and blocked other requests.
+- [cacher] Panics on requests without a path, on failures to create the
+  cache directory, and on failures to cache an item.
+- [cacher] Shutdown hung when a Release file remained in `meta_dir` for
+  a prefix removed from the mapping.
+- [cacher] Handlers kept waiting for downloads after clients disconnected.
+- [cacher] A newer download result could be dropped by the invalidation
+  timer of an older one.
+- [mirror] Release files lacking some checksum fields caused requests
+  for invalid by-hash paths.
+- [mirror] Failures to flush `info.json` were ignored, which could leave
+  a truncated index.
+- [mirror] Failed responses stayed open across retries, and the retry
+  backoff could not be interrupted by cancellation.
+
+### Security
+- [cacher] Set `ReadHeaderTimeout` on the HTTP server to limit slow
+  clients.
 
 ## [1.4.3] - 2026-09-07
 ### Added
@@ -103,7 +142,7 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/cybozu-go/aptutil/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.4.3...HEAD
 [1.4.3]: https://github.com/cybozu-go/aptutil/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/cybozu-go/aptutil/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/cybozu-go/aptutil/compare/v1.4.0...v1.4.1

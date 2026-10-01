@@ -321,9 +321,14 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 
 	defer closeRespBody(resp)
 	statusCode = resp.StatusCode
-	if statusCode != 200 {
+	if statusCode != http.StatusOK {
 		return
 	}
+
+	// The upstream responded with 200, but the item is not cached until
+	// all the steps below succeed.  Report failures as 502 so that Get
+	// does not mistake them for success and retry immediately.
+	statusCode = http.StatusBadGateway
 
 	storage := c.items
 	if apt.IsMeta(p) {
@@ -414,6 +419,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		}
 	}
 	c.info[p] = fi
+	statusCode = http.StatusOK
 	log.Info("downloaded and cached", map[string]interface{}{
 		"path": p,
 	})

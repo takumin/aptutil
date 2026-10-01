@@ -89,6 +89,10 @@ func NewCacher(config *Config) (*Cacher, error) {
 	}
 	capacity := uint64(config.CacheCapacity) * gib
 
+	if config.MaxConns < 0 {
+		return nil, errors.New("max_conns must be >= 0")
+	}
+
 	meta, err := NewStorage(metaDir, 0)
 	if err != nil {
 		return nil, errors.Wrap(err, "meta_dir")

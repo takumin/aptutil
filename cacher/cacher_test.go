@@ -152,3 +152,15 @@ func TestCacherUpdateListed(t *testing.T) {
 		}
 	}
 }
+
+func TestNewCacherNegativeMaxConns(t *testing.T) {
+	t.Parallel()
+
+	config := NewConfig()
+	config.MetaDirectory = t.TempDir()
+	config.CacheDirectory = t.TempDir()
+	config.MaxConns = -1
+	if _, err := NewCacher(config); err == nil {
+		t.Error("NewCacher must fail with negative max_conns")
+	}
+}

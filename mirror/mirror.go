@@ -33,6 +33,7 @@ type Mirror struct {
 	storage *Storage
 	current *Storage
 
+	// semaphore limits concurrent downloads.  nil means no limit.
 	semaphore chan struct{}
 	client    *http.Client
 }
@@ -51,6 +52,9 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 	}
 	if err := mc.Check(); err != nil {
 		return nil, errors.Wrap(err, id)
+	}
+	if c.MaxConns < 0 {
+		return nil, errors.New("max_conns must be >= 0")
 	}
 
 	var currentStorage *Storage
@@ -80,9 +84,13 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		return nil, errors.Wrap(err, id)
 	}
 
-	sem := make(chan struct{}, c.MaxConns)
-	for i := 0; i < c.MaxConns; i++ {
-		sem <- struct{}{}
+	// zero disables limit on the number of connections.
+	var sem chan struct{}
+	if c.MaxConns > 0 {
+		sem = make(chan struct{}, c.MaxConns)
+		for i := 0; i < c.MaxConns; i++ {
+			sem <- struct{}{}
+		}
 	}
 
 	transport := clonedTransport(http.DefaultTransport)
@@ -91,7 +99,9 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 			Proxy: http.ProxyFromEnvironment,
 		}
 	}
-	transport.MaxIdleConnsPerHost = c.MaxConns
+	if c.MaxConns > 0 {
+		transport.MaxIdleConnsPerHost = c.MaxConns
+	}
 
 	mr := &Mirror{
 		id:        id,
@@ -113,6 +123,27 @@ func clonedTransport(rt http.RoundTripper) *http.Transport {
 		return nil
 	}
 	return t.Clone()
+}
+
+// acquireSemaphore waits for a slot to download an item.
+func (m *Mirror) acquireSemaphore(ctx context.Context) error {
+	if m.semaphore == nil {
+		return ctx.Err()
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.semaphore:
+		return nil
+	}
+}
+
+// releaseSemaphore releases the slot acquired by acquireSemaphore.
+func (m *Mirror) releaseSemaphore() {
+	if m.semaphore != nil {
+		m.semaphore <- struct{}{}
+	}
 }
 
 func (m *Mirror) storeLink(fi *apt.FileInfo, fp string, byhash bool) error {
@@ -305,7 +336,7 @@ func (m *Mirror) download(ctx context.Context,
 		}
 		r.tempfile = tempfile
 		ch <- r
-		m.semaphore <- struct{}{}
+		m.releaseSemaphore()
 	}()
 
 	var retries uint
@@ -501,10 +532,8 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	results := make(chan *dlResult, len(releases))
 
 	for _, p := range releases {
-		select {
-		case <-ctx.Done():
-			return nil, false, ctx.Err()
-		case <-m.semaphore:
+		if err := m.acquireSemaphore(ctx); err != nil {
+			return nil, false, err
 		}
 
 		go m.download(ctx, p, nil, false, results)
@@ -637,10 +666,8 @@ func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-m.semaphore:
+		if err := m.acquireSemaphore(ctx); err != nil {
+			return nil, err
 		}
 
 		env.Go(func(ctx context.Context) error {

@@ -109,3 +109,36 @@ func TestMirrorDownloadCancelDuringBackoff(t *testing.T) {
 		t.Fatal("download did not return")
 	}
 }
+
+func TestMirrorUnlimitedConns(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Config{
+		Dir:      t.TempDir(),
+		MaxConns: 0, // no limit
+		Mirrors: map[string]*MirrConfig{
+			"test": {URL: tomlURL{u}, Suites: []string{"s"}},
+		},
+	}
+	m, err := NewMirror(time.Now(), "test", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	indexMap, _, err := m.downloadRelease(ctx, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexMap) != 0 {
+		t.Errorf("indexMap = %v, want empty", indexMap)
+	}
+}

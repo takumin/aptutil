@@ -47,6 +47,12 @@ All notable changes to this project will be documented in this file.
 - [mirror] A broken symlink in `dir` stopped removing old mirrors.
 - [mirror] Failed responses stayed open across retries, and the retry
   backoff could not be interrupted by cancellation.
+- [mirror] A download hung forever, holding the lock file, when an
+  upstream server stopped sending data; it is now aborted and retried
+  after a minute without progress.
+- Paragraphs after consecutive empty lines in indices were silently
+  ignored, so go-apt-mirror missed the packages listed in them.
+  Lines consisting solely of spaces and tabs are also treated as empty.
 
 ### Security
 - [cacher] Set `ReadHeaderTimeout` on the HTTP server to limit slow

@@ -21,7 +21,16 @@ const (
 	timestampFormat  = "20060102_150405"
 	progressInterval = 5 * time.Minute
 	httpRetries      = 5
+
+	// stallTimeout is how long a download may make no progress, either
+	// waiting for the response header or reading the body, before it
+	// is aborted and retried.
+	stallTimeout = 1 * time.Minute
 )
+
+// errStalled is returned when a download makes no progress for
+// stallTimeout.
+var errStalled = errors.New("download stalled")
 
 var validID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
@@ -36,6 +45,9 @@ type Mirror struct {
 	// semaphore limits concurrent downloads.  nil means no limit.
 	semaphore chan struct{}
 	client    *http.Client
+
+	// stallTimeout aborts a download that makes no progress for it.
+	stallTimeout time.Duration
 }
 
 // NewMirror constructs a Mirror for given mirror id.
@@ -113,6 +125,7 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		client: &http.Client{
 			Transport: transport,
 		},
+		stallTimeout: stallTimeout,
 	}
 	return mr, nil
 }
@@ -315,6 +328,64 @@ func closeRespBody(r *http.Response) {
 	_ = r.Body.Close()
 }
 
+// stallWatcher cancels a request when it makes no progress for a while.
+//
+// Without it, a download from an upstream that keeps the connection
+// open but stops sending data would hang forever while holding the
+// lock file.
+type stallWatcher struct {
+	timer   *time.Timer
+	timeout time.Duration
+	cancel  context.CancelCauseFunc
+}
+
+// watchStall returns a context for a request derived from ctx, and
+// a stallWatcher that cancels it after timeout without progress.
+func watchStall(ctx context.Context, timeout time.Duration) (context.Context, *stallWatcher) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	w := &stallWatcher{
+		timeout: timeout,
+		cancel:  cancel,
+	}
+	w.timer = time.AfterFunc(timeout, func() { cancel(errStalled) })
+	return ctx, w
+}
+
+// wrap returns a ReadCloser that postpones the timeout whenever data
+// is read from rc.
+func (w *stallWatcher) wrap(rc io.ReadCloser) io.ReadCloser {
+	return &stallReader{ReadCloser: rc, w: w}
+}
+
+// stop releases the resources of w.  It must be called after the
+// response body is closed so that the connection can be reused.
+func (w *stallWatcher) stop() {
+	w.timer.Stop()
+	w.cancel(nil)
+}
+
+type stallReader struct {
+	io.ReadCloser
+	w *stallWatcher
+}
+
+func (r *stallReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.w.timer.Reset(r.w.timeout)
+	}
+	return n, err
+}
+
+// stallError returns errStalled if ctx was canceled by a stallWatcher,
+// or err otherwise.
+func stallError(ctx context.Context, err error) error {
+	if errors.Is(context.Cause(ctx), errStalled) {
+		return errStalled
+	}
+	return err
+}
+
 func closeAndRemoveFile(f *os.File) {
 	_ = f.Close()
 	_ = os.Remove(f.Name())
@@ -326,6 +397,7 @@ func (m *Mirror) download(ctx context.Context,
 ) {
 	var tempfile *os.File
 	var resp *http.Response
+	var watcher *stallWatcher
 	r := &dlResult{
 		path: p,
 	}
@@ -333,6 +405,9 @@ func (m *Mirror) download(ctx context.Context,
 	defer func() {
 		if resp != nil {
 			closeRespBody(resp)
+		}
+		if watcher != nil {
+			watcher.stop()
 		}
 		r.tempfile = tempfile
 		ch <- r
@@ -354,6 +429,10 @@ RETRY:
 	if resp != nil {
 		closeRespBody(resp)
 		resp = nil
+	}
+	if watcher != nil {
+		watcher.stop()
+		watcher = nil
 	}
 
 	// allow interrupts
@@ -392,8 +471,15 @@ RETRY:
 		ProtoMinor: 1,
 		Header:     header,
 	}
-	resp, err := m.client.Do(req.WithContext(ctx))
+	reqCtx, watcher := watchStall(ctx, m.stallTimeout)
+	resp, err := m.client.Do(req.WithContext(reqCtx))
 	if err != nil {
+		err = stallError(reqCtx, err)
+		log.Warn("GET failed", map[string]interface{}{
+			"repo":  m.id,
+			"path":  p,
+			"error": err.Error(),
+		})
 		if retries < httpRetries {
 			retries++
 			goto RETRY
@@ -410,6 +496,7 @@ RETRY:
 		})
 	}
 
+	resp.Body = watcher.wrap(resp.Body)
 	r.status = resp.StatusCode
 	if r.status >= 500 && retries < httpRetries {
 		retries++
@@ -427,6 +514,12 @@ RETRY:
 	}
 	fi2, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)
 	if err != nil {
+		err = stallError(reqCtx, err)
+		log.Warn("GET failed", map[string]interface{}{
+			"repo":  m.id,
+			"path":  p,
+			"error": err.Error(),
+		})
 		if retries < httpRetries {
 			retries++
 			goto RETRY

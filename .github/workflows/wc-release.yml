@@ -44,10 +44,24 @@ jobs:
         sha256sum -c SHA256SUMS
     - name: Check artifacts
       run: tree --charset ASCII dist/
+    - name: Extract release notes
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |-
+        awk -v version="${VERSION#v}" '
+          /^## \[/ { if (found) exit; found = index($0, "## [" version "]") == 1; next }
+          found
+        ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
+        if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/release-notes.md"; then
+          echo "::error::No release notes for ${VERSION} in CHANGELOG.md"
+          exit 1
+        fi
+        cat "${RUNNER_TEMP}/release-notes.md"
+      env:
+        VERSION: ${{ github.ref_name }}
     - name: Release
       if: startsWith(github.ref, 'refs/tags/')
       run: |-
-        gh release create "${VERSION}" --generate-notes dist/*
+        gh release create "${VERSION}" --notes-file "${RUNNER_TEMP}/release-notes.md" dist/*
       env:
         VERSION: ${{ github.ref_name }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

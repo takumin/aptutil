@@ -59,7 +59,7 @@ func (s *Storage) Dir() string {
 func (s *Storage) Load() error {
 	infoPath := filepath.Join(s.dir, infoJSON)
 
-	f, err := os.Open(infoPath)
+	f, err := os.Open(infoPath) //nolint:gosec // G304: info file lives in the storage directory
 	switch {
 	case os.IsNotExist(err):
 		return nil
@@ -90,7 +90,7 @@ func (s *Storage) Save() error {
 	defer s.mu.Unlock()
 
 	infoPath := filepath.Join(s.dir, infoJSON)
-	f, err := os.OpenFile(infoPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(infoPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644) //nolint:gosec // G304: info file lives in the storage directory
 	if err != nil {
 		return err
 	}

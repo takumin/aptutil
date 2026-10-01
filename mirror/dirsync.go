@@ -9,7 +9,7 @@ import (
 //
 // This should be called after os.Create, os.Rename and so on.
 func DirSync(d string) error {
-	f, err := os.OpenFile(d, os.O_RDONLY, 0755)
+	f, err := os.OpenFile(d, os.O_RDONLY, 0755) //nolint:gosec // G304: d is a mirror directory, opened read-only to fsync it
 	if err != nil {
 		return err
 	}

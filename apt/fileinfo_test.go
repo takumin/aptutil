@@ -213,7 +213,7 @@ func testFileInfoCopy(t *testing.T) {
 
 	fi := &FileInfo{
 		path:      p,
-		size:      uint64(r.Size()),
+		size:      uint64(r.Size()), //nolint:gosec // G115: Size of a strings.Reader is non-negative
 		md5sum:    md5sum[:],
 		sha1sum:   sha1sum[:],
 		sha256sum: sha256sum[:],

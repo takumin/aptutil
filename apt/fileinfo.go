@@ -126,7 +126,7 @@ type fileInfoJSON struct {
 func (fi *FileInfo) MarshalJSON() ([]byte, error) {
 	var fij fileInfoJSON
 	fij.Path = fi.path
-	fij.Size = int64(fi.size)
+	fij.Size = int64(fi.size) //nolint:gosec // G115: file sizes never exceed math.MaxInt64
 	if fi.md5sum != nil {
 		fij.MD5Sum = hex.EncodeToString(fi.md5sum)
 	}
@@ -146,7 +146,7 @@ func (fi *FileInfo) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	fi.path = fij.Path
-	fi.size = uint64(fij.Size)
+	fi.size = uint64(fij.Size) //nolint:gosec // G115: Size is produced by MarshalJSON and is non-negative
 	md5sum, err := hex.DecodeString(fij.MD5Sum)
 	if err != nil {
 		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
@@ -180,7 +180,7 @@ func CopyWithFileInfo(dst io.Writer, src io.Reader, p string) (*FileInfo, error)
 
 	return &FileInfo{
 		path:      p,
-		size:      uint64(n),
+		size:      uint64(n), //nolint:gosec // G115: io.Copy never returns a negative count
 		md5sum:    md5hash.Sum(nil),
 		sha1sum:   sha1hash.Sum(nil),
 		sha256sum: sha256hash.Sum(nil),

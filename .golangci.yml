@@ -6,7 +6,20 @@ run:
   timeout: 5m
 linters:
   default: standard
+  enable:
+  - gosec
   settings:
+    gosec:
+      excludes:
+      # Unchecked errors are covered by errcheck, which already knows which
+      # functions (the log helpers) are safe to ignore.
+      - G104
+      config:
+        # Mirrored and cached files are served to apt clients (often through a
+        # separate web server), so they must stay world-readable.
+        G301: '0755'
+        G302: '0644'
+        G306: '0644'
     errcheck:
       # Logging failures are not actionable; ignore errors returned by the
       # cybozu-go/log package-level helpers.
@@ -16,6 +29,14 @@ linters:
       - github.com/cybozu-go/log.Warn
       - github.com/cybozu-go/log.Error
       - github.com/cybozu-go/log.Critical
+  exclusions:
+    rules:
+    # APT Release/Packages indices carry MD5 and SHA1 checksums, so they must be
+    # computed for compatibility; they are not used for security decisions.
+    - path: apt/fileinfo(_test)?\.go
+      linters:
+      - gosec
+      text: G(401|501|505)
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

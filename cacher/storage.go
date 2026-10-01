@@ -135,7 +135,7 @@ func (cm *Storage) maint() {
 }
 
 func readData(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: path is built from the cache directory and a validated item path
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (cm *Storage) Load() error {
 			return nil
 		}
 
-		size := uint64(info.Size())
+		size := uint64(info.Size()) //nolint:gosec // G115: regular file sizes are non-negative
 		e := &entry{
 			// delay calculation of checksums.
 			FileInfo: apt.MakeFileInfoNoChecksum(subpath, size),
@@ -220,10 +220,10 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	destpath := filepath.Join(cm.dir, p+fileSuffix)
 	dirpath := filepath.Dir(destpath)
 
-	_, err := os.Stat(dirpath)
+	_, err := os.Stat(dirpath) //nolint:gosec // G703: p is validated to stay within cm.dir
 	switch {
 	case os.IsNotExist(err):
-		err = os.MkdirAll(dirpath, 0755)
+		err = os.MkdirAll(dirpath, 0755) //nolint:gosec // G703: p is validated to stay within cm.dir
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	defer cm.mu.Unlock()
 
 	if existing, ok := cm.cache[p]; ok {
-		err = os.Remove(destpath)
+		err = os.Remove(destpath) //nolint:gosec // G703: p is validated to stay within cm.dir
 		if err != nil {
 			if !os.IsNotExist(err) {
 				return err

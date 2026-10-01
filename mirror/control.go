@@ -109,10 +109,10 @@ func gc(ctx context.Context, c *Config) error {
 // will be updated.
 func Run(c *Config, mirrors []string) error {
 	lockFile := filepath.Join(c.Dir, lockFilename)
-	f, err := os.Open(lockFile)
+	f, err := os.Open(lockFile) //nolint:gosec // G304: lock file lives in the configured mirror directory
 	switch {
 	case os.IsNotExist(err):
-		f2, err := os.OpenFile(lockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		f2, err := os.OpenFile(lockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644) //nolint:gosec // G304: lock file lives in the configured mirror directory
 		if err != nil {
 			return err
 		}

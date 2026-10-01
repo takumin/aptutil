@@ -325,6 +325,35 @@ func closeRespBody(r *http.Response) {
 	_ = r.Body.Close()
 }
 
+// localError is an error of the local file system.  Unlike errors of
+// the upstream server or the network, retrying the download does not
+// fix it.
+type localError struct {
+	err error
+}
+
+func (e *localError) Error() string {
+	return e.err.Error()
+}
+
+func (e *localError) Unwrap() error {
+	return e.err
+}
+
+// localWriter wraps errors of w by localError so that they are told
+// from errors reading the response body.
+type localWriter struct {
+	w io.Writer
+}
+
+func (lw localWriter) Write(p []byte) (int, error) {
+	n, err := lw.w.Write(p)
+	if err != nil {
+		err = &localError{err}
+	}
+	return n, err
+}
+
 func closeAndRemoveFile(f *os.File) {
 	_ = f.Close()
 	_ = os.Remove(f.Name())
@@ -448,10 +477,15 @@ RETRY:
 
 	tempfile, err = m.storage.TempFile()
 	if err != nil {
+		r.err = &localError{err}
+		return
+	}
+	fi2, err := apt.CopyWithFileInfo(localWriter{tempfile}, resp.Body, p)
+	var lerr *localError
+	if errors.As(err, &lerr) {
 		r.err = err
 		return
 	}
-	fi2, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)
 	if err != nil {
 		err = stall.Error(reqCtx, err)
 		log.Warn("GET failed", map[string]interface{}{
@@ -468,12 +502,12 @@ RETRY:
 	}
 	err = tempfile.Sync()
 	if err != nil {
-		r.err = errors.New("tempfile.Sync failed")
+		r.err = &localError{errors.Wrap(err, "tempfile.Sync")}
 		return
 	}
 	err = os.Chmod(tempfile.Name(), 0o644)
 	if err != nil {
-		r.err = errors.New("os.Chmod(tempfile.Name(), 0644) failed")
+		r.err = &localError{errors.Wrap(err, "os.Chmod")}
 		return
 	}
 
@@ -493,7 +527,7 @@ RETRY:
 
 	_, err = tempfile.Seek(0, io.SeekStart)
 	if err != nil {
-		r.err = errors.New("tempfile.Seek failed")
+		r.err = &localError{errors.Wrap(err, "tempfile.Seek")}
 		return
 	}
 	r.fi = fi2

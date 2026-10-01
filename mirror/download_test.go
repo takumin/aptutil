@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -272,5 +273,34 @@ func TestMirrorDownloadCancelAfterStall(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("download did not return")
+	}
+}
+
+func TestMirrorDownloadLocalErrorNotRetried(t *testing.T) {
+	t.Parallel()
+
+	var reqs atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs.Add(1)
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+
+	m := newTestMirror(t, srv.URL)
+	// make TempFile fail.
+	if err := os.RemoveAll(m.storage.Dir()); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := make(chan *dlResult, 1)
+	m.download(context.Background(), "a", nil, false, ch)
+	r := <-ch
+
+	var lerr *localError
+	if !errors.As(r.err, &lerr) {
+		t.Errorf("err = %v, want localError", r.err)
+	}
+	if n := reqs.Load(); n != 1 {
+		t.Errorf("requests = %d, want 1", n)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
 )
@@ -165,5 +167,90 @@ func TestCacherUpdateListedAliases(t *testing.T) {
 	}
 	if fi := c.aliases[newFI.SHA256Path()]; fi != newFI {
 		t.Errorf("aliases[%s] = %v, want %v", newFI.SHA256Path(), fi, newFI)
+	}
+}
+
+// TestCacherGetSupersededWhileDownloading tests that an index downloaded
+// before Release is updated does not replace the one listed in the new
+// Release.
+func TestCacherGetSupersededWhileDownloading(t *testing.T) {
+	t.Parallel()
+
+	const (
+		release  = "dists/noble/Release"
+		packages = "dists/noble/main/binary-amd64/Packages"
+	)
+	makePackages := func(name string) []byte {
+		data := "deb data of " + name
+		return []byte(fmt.Sprintf("Package: %s\nFilename: pool/%s.deb\nSize: %d\nSHA256: %s\n",
+			name, name, len(data), sha256Hex([]byte(data))))
+	}
+	makeRelease := func(pkgs []byte) []byte {
+		return []byte(fmt.Sprintf("SHA256:\n %s %d main/binary-amd64/Packages\n",
+			sha256Hex(pkgs), len(pkgs)))
+	}
+	oldPackages := makePackages("old")
+	newPackages := makePackages("new")
+
+	tr := newTestRepo()
+	tr.set(release, makeRelease(oldPackages))
+	tr.set(packages, oldPackages)
+
+	// the first request for Packages is blocked until released, and
+	// then served with the old content.
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var blocked atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+packages && blocked.CompareAndSwap(false, true) {
+			close(started)
+			<-unblock
+			_, _ = w.Write(oldPackages)
+			return
+		}
+		tr.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	if status, _ := getData(t, c, "ubuntu/"+release); status != http.StatusOK {
+		t.Fatalf("status of Release = %d", status)
+	}
+
+	type result struct {
+		status int
+		data   string
+	}
+	done := make(chan result, 1)
+	go func() {
+		status, data := getData(t, c, "ubuntu/"+packages)
+		done <- result{status, data}
+	}()
+	<-started
+
+	// the upstream is updated, and so is Release in the cacher.
+	tr.set(release, makeRelease(newPackages))
+	tr.set(packages, newPackages)
+	<-c.Download("ubuntu/"+release, nil)
+	close(unblock)
+
+	select {
+	case r := <-done:
+		if r.status != http.StatusOK {
+			t.Fatalf("status of Packages = %d", r.status)
+		}
+		if r.data != string(newPackages) {
+			t.Errorf("Packages = %q, want the new one", r.data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get did not return")
+	}
+
+	c.fiLock.RLock()
+	_, hasOld := c.info["ubuntu/pool/old.deb"]
+	_, hasNew := c.info["ubuntu/pool/new.deb"]
+	c.fiLock.RUnlock()
+	if hasOld || !hasNew {
+		t.Errorf("items listed: old = %v, new = %v, want only the new one", hasOld, hasNew)
 	}
 }

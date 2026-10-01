@@ -583,6 +583,20 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 	c.fiLock.Lock()
 	defer c.fiLock.Unlock()
 
+	// A meta data file may have been updated while downloading, and
+	// now list dest with different checksums.  Discard the stale item
+	// so that it does not replace the newer one nor bring back the
+	// items listed in it.  Get retries with the new checksums.
+	if c.refs[dest] > 0 {
+		if cur := c.info[dest]; cur != nil && !cur.Same(fi) {
+			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
+				"path": dest,
+			})
+			statusCode = http.StatusOK
+			return
+		}
+	}
+
 	// To keep consistency between Cacher and Storage so that
 	// both have the same set of FileInfo, storage.Insert need to be
 	// guarded by c.fiLock.

@@ -71,6 +71,9 @@ All notable changes to this project will be documented in this file.
   Lines consisting solely of spaces and tabs are also treated as empty.
 - [mirror] A file missing or truncated in the current mirror made every
   later update fail; it is now downloaded again.
+- [cacher] An index downloaded while its Release was updated replaced
+  the new one, causing hash sum mismatches until the next update of
+  Release; it is now discarded and downloaded again.
 
 ### Security
 - [cacher] Set `ReadHeaderTimeout` on the HTTP server to limit slow

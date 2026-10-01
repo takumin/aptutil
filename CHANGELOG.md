@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
   being cached.
 - [cacher] Memory grew without bound because file info entries of
   superseded packages were never removed.
+- [cacher] Memory grew without bound because file info entries of items
+  not listed in any meta data file were never removed.
+- [cacher] Cached items not listed in any meta data file were downloaded
+  again after restart.
 - [cacher] Calculating checksums of items loaded at startup read whole
   files into memory and blocked other requests.
 - [cacher] Panics on requests without a path, on failures to create the

@@ -33,6 +33,9 @@ them are effectively invalidated.
 Caches for non-meta data files may be removed in LRU fashion when the
 total size of cached files exceeds the given capacity.
 
+Items not listed in any meta data file are served from the cache as is
+without validation.
+
 Note that go-apt-cacher does _not_ reference cache-related HTTP headers
 such as "Last-Modified" or "Cache-Control" at all.
 

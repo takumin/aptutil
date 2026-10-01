@@ -374,3 +374,48 @@ func TestCacherGetTooLarge(t *testing.T) {
 		t.Errorf("temporary files are left: %v", l)
 	}
 }
+
+func TestCacherGetUnlisted(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	const p = "pool/b.deb"
+	tr.set(p, []byte("b"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	for i := 0; i < 2; i++ {
+		if status, data := getData(t, c, "ubuntu/"+p); status != http.StatusOK || data != "b" {
+			t.Fatalf("Get = %d, %q", status, data)
+		}
+	}
+	if n := tr.hits(p); n != 1 {
+		t.Errorf("upstream hits = %d, want 1", n)
+	}
+
+	// items not listed in meta data are looked up in Storage.
+	if _, ok := c.info["ubuntu/"+p]; ok {
+		t.Error("an unlisted item should not be kept in info")
+	}
+
+	// cached items are served after restart without downloading.
+	c2, err := NewCacher(&Config{
+		CheckInterval:  defaultCheckInterval,
+		CachePeriod:    defaultCachePeriod,
+		MetaDirectory:  c.meta.dir,
+		CacheDirectory: c.items.dir,
+		CacheCapacity:  defaultCacheCapacity,
+		Mapping:        map[string]string{"ubuntu": srv.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, data := getData(t, c2, "ubuntu/"+p); status != http.StatusOK || data != "b" {
+		t.Fatalf("Get after restart = %d, %q", status, data)
+	}
+	if n := tr.hits(p); n != 1 {
+		t.Errorf("upstream hits after restart = %d, want 1", n)
+	}
+}

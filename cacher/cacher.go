@@ -47,7 +47,9 @@ type Cacher struct {
 	maxConns      int
 
 	fiLock sync.RWMutex
-	info   map[string]*apt.FileInfo
+	// info has FileInfo of meta data files and items listed in them.
+	// Items not listed anywhere are looked up by path in Storage.
+	info map[string]*apt.FileInfo
 	// listed maps a meta data file to the items it lists, and refs counts
 	// how many meta data files list each item.  They are used to remove
 	// stale entries from info when meta data files are updated.
@@ -359,6 +361,14 @@ func (c *Cacher) releaseTask(t *dlTask) {
 	}
 }
 
+// storage returns the Storage for the item at p.
+func (c *Cacher) storage(p string) *Storage {
+	if apt.IsMeta(p) {
+		return c.meta
+	}
+	return c.items
+}
+
 // download is a goroutine to download an item.
 func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.FileInfo, t *dlTask) {
 	c.acquireSemaphore(u.Host)
@@ -430,11 +440,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	// does not mistake them for success and retry immediately.
 	statusCode = http.StatusBadGateway
 
-	storage := c.items
-	if apt.IsMeta(p) {
-		storage = c.meta
-	}
-
+	storage := c.storage(p)
 	tempfile, err := storage.TempFile()
 	if err != nil {
 		log.Warn("GET failed", map[string]interface{}{
@@ -532,14 +538,19 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	if parsed {
 		c.updateListed(p, fil)
 	}
-	if apt.IsMeta(p) {
+	switch {
+	case apt.IsMeta(p):
 		_, ok := c.info[p]
 		if !ok {
 			// As this is the first time that downloaded meta file p,
 			c.maintMeta(p)
 		}
+		c.info[p] = fi
+	case c.refs[p] > 0:
+		c.info[p] = fi
 	}
-	c.info[p] = fi
+	// Other items are not kept in c.info so that it does not grow
+	// without bound; Get looks them up in Storage by path.
 	statusCode = http.StatusOK
 	log.Info("downloaded and cached", map[string]interface{}{
 		"path": p,
@@ -579,6 +590,27 @@ func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
 	c.listed[p] = paths
 }
 
+// lookup looks up the cached item at p.
+//
+// It returns FileInfo to validate the item if known, and the cache
+// file.  If the item is not cached, the returned os.File is nil.
+func (c *Cacher) lookup(p string) (valid *apt.FileInfo, f *os.File, err error) {
+	c.fiLock.RLock()
+	valid = c.info[p]
+	c.fiLock.RUnlock()
+
+	storage := c.storage(p)
+	if valid != nil {
+		f, err = storage.Lookup(valid)
+	} else {
+		f, err = storage.Open(p)
+	}
+	if errors.Is(err, ErrNotFound) {
+		return valid, nil, nil
+	}
+	return valid, f, err
+}
+
 // Get looks up a cached item, and if not found, downloads it
 // from the upstream server.
 //
@@ -595,32 +627,21 @@ func (c *Cacher) Get(ctx context.Context, p string) (statusCode int, f *os.File,
 		return http.StatusNotFound, nil, nil
 	}
 
-	storage := c.items
-	if apt.IsMeta(p) {
-		if !apt.IsSupported(p) {
-			// return 404 for unsupported compression algorithms
-			return http.StatusNotFound, nil, nil
-		}
-		storage = c.meta
+	if apt.IsMeta(p) && !apt.IsSupported(p) {
+		// return 404 for unsupported compression algorithms
+		return http.StatusNotFound, nil, nil
 	}
 
 RETRY:
-	c.fiLock.RLock()
-	fi, ok := c.info[p]
-	c.fiLock.RUnlock()
-
-	if ok {
-		f, err := storage.Lookup(fi)
-		switch {
-		case err == nil:
-			return http.StatusOK, f, nil
-		case errors.Is(err, ErrNotFound):
-		default:
-			log.Error("lookup failure", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return http.StatusInternalServerError, nil, err
-		}
+	fi, f, err := c.lookup(p)
+	switch {
+	case err != nil:
+		log.Error("lookup failure", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return http.StatusInternalServerError, nil, err
+	case f != nil:
+		return http.StatusOK, f, nil
 	}
 
 	// not found in storage.

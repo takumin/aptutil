@@ -327,10 +327,31 @@ func (cm *Storage) open(fi *apt.FileInfo, e *entry) (*os.File, error) {
 		return nil, ErrNotFound
 	}
 
+	return cm.touchAndOpen(e)
+}
+
+// touchAndOpen marks e as recently used, and opens its file.
+// cm.mu lock must be acquired beforehand.
+func (cm *Storage) touchAndOpen(e *entry) (*os.File, error) {
 	e.atime = cm.lclock
 	cm.lclock++
 	heap.Fix(cm, e.index)
 	return os.Open(filepath.Join(cm.dir, e.FilePath()))
+}
+
+// Open opens the item at p without checking its checksums.
+// If no item is found, ErrNotFound is returned.
+//
+// The caller is responsible to close the returned os.File.
+func (cm *Storage) Open(p string) (*os.File, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	e, ok := cm.cache[p]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return cm.touchAndOpen(e)
 }
 
 // ListAll returns a list of *apt.FileInfo for all cached items.

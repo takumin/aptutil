@@ -70,3 +70,16 @@ func TestCacherGetChecksumMismatch(t *testing.T) {
 		t.Errorf("upstream hits = %d, want 1", n)
 	}
 }
+
+func TestNewTransport(t *testing.T) {
+	t.Parallel()
+
+	if n := newTransport(10).MaxIdleConnsPerHost; n != 10 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 10", n)
+	}
+
+	// zero means no limit on connections; keep the default.
+	if n := newTransport(0).MaxIdleConnsPerHost; n != 0 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 0", n)
+	}
+}

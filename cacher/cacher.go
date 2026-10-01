@@ -114,7 +114,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		um:            um,
 		checkInterval: checkInterval,
 		cachePeriod:   cachePeriod,
-		client:        &http.Client{},
+		client:        &http.Client{Transport: newTransport(config.MaxConns)},
 		maxConns:      config.MaxConns,
 		info:          make(map[string]*apt.FileInfo),
 		dlChannels:    make(map[string]chan struct{}),
@@ -153,6 +153,24 @@ func NewCacher(config *Config) (*Cacher, error) {
 	}
 
 	return c, nil
+}
+
+// newTransport returns an http.Transport that keeps up to maxConns idle
+// connections per upstream host so that concurrent downloads can reuse
+// them instead of reconnecting.
+func newTransport(maxConns int) *http.Transport {
+	var transport *http.Transport
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = t.Clone()
+	} else {
+		transport = &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		}
+	}
+	if maxConns > 0 {
+		transport.MaxIdleConnsPerHost = maxConns
+	}
+	return transport
 }
 
 func (c *Cacher) acquireSemaphore(host string) {

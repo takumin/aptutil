@@ -1,11 +1,14 @@
 package cacher
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cybozu-go/aptutil/apt"
 )
 
 func newTestCacher(t *testing.T, upstream string) *Cacher {
@@ -81,5 +84,71 @@ func TestNewTransport(t *testing.T) {
 	// zero means no limit on connections; keep the default.
 	if n := newTransport(0).MaxIdleConnsPerHost; n != 0 {
 		t.Errorf("MaxIdleConnsPerHost = %d, want 0", n)
+	}
+}
+
+func TestCacherUpdateListed(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCacher(t, "http://example.com")
+
+	mustFI := func(p, data string) *apt.FileInfo {
+		t.Helper()
+		fi, err := apt.CopyWithFileInfo(new(bytes.Buffer), bytes.NewReader([]byte(data)), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fi
+	}
+
+	const (
+		gz = "ubuntu/dists/noble/main/binary-amd64/Packages.gz"
+		xz = "ubuntu/dists/noble/main/binary-amd64/Packages.xz"
+		a  = "ubuntu/pool/a.deb"
+		b  = "ubuntu/pool/b.deb"
+		c2 = "ubuntu/pool/c.deb"
+	)
+
+	c.updateListed(gz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")})
+	c.updateListed(xz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")})
+
+	// Packages.gz is updated: a is replaced by c, and b is updated.
+	newB := mustFI(b, "b2")
+	c.updateListed(gz, []*apt.FileInfo{newB, mustFI(c2, "c1")})
+
+	for _, p := range []string{a, b, c2} {
+		if _, ok := c.info[p]; !ok {
+			t.Errorf("%s should be kept", p)
+		}
+	}
+	if !c.info[b].Same(newB) {
+		t.Errorf("%s should be updated", b)
+	}
+
+	// Packages.xz is updated as well; a is no longer listed anywhere.
+	c.updateListed(xz, []*apt.FileInfo{newB, mustFI(c2, "c1")})
+
+	if _, ok := c.info[a]; ok {
+		t.Errorf("%s should be removed", a)
+	}
+	for _, p := range []string{b, c2} {
+		if _, ok := c.info[p]; !ok {
+			t.Errorf("%s should be kept", p)
+		}
+	}
+	if n := c.refs[b]; n != 2 {
+		t.Errorf("refs[%s] = %d, want 2", b, n)
+	}
+
+	// an empty list releases all items.
+	c.updateListed(gz, nil)
+	c.updateListed(xz, nil)
+	if len(c.refs) != 0 || len(c.listed) != 0 {
+		t.Errorf("refs = %v, listed = %v, want empty", c.refs, c.listed)
+	}
+	for _, p := range []string{a, b, c2} {
+		if _, ok := c.info[p]; ok {
+			t.Errorf("%s should be removed", p)
+		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,11 @@ type Cacher struct {
 
 	fiLock sync.RWMutex
 	info   map[string]*apt.FileInfo
+	// listed maps a meta data file to the items it lists, and refs counts
+	// how many meta data files list each item.  They are used to remove
+	// stale entries from info when meta data files are updated.
+	listed map[string][]string
+	refs   map[string]int
 
 	dlLock     sync.RWMutex
 	dlChannels map[string]chan struct{}
@@ -117,6 +123,8 @@ func NewCacher(config *Config) (*Cacher, error) {
 		client:        &http.Client{Transport: newTransport(config.MaxConns)},
 		maxConns:      config.MaxConns,
 		info:          make(map[string]*apt.FileInfo),
+		listed:        make(map[string][]string),
+		refs:          make(map[string]int),
 		dlChannels:    make(map[string]chan struct{}),
 		results:       make(map[string]int),
 		hostSem:       make(map[string]chan struct{}),
@@ -137,10 +145,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
 		}
-		fil = addPrefix(t[0], fil)
-		for _, fi2 := range fil {
-			c.info[fi2.Path()] = fi2
-		}
+		c.updateListed(fi.Path(), addPrefix(t[0], fil))
 	}
 
 	// add meta files w/o checksums (Release, Release.gpg, and InRelease).
@@ -390,6 +395,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	}
 
 	var fil []*apt.FileInfo
+	parsed := false
 
 	if t := strings.SplitN(path.Clean(p), "/", 2); len(t) == 2 && apt.IsMeta(t[1]) {
 		_, err = tempfile.Seek(0, io.SeekStart)
@@ -407,6 +413,8 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 				"error": err.Error(),
 			})
 			// do not return; we accept broken meta data as is.
+		} else {
+			parsed = true
 		}
 		fil = addPrefix(t[0], fil)
 	}
@@ -426,8 +434,8 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		panic(err)
 	}
 
-	for _, fi2 := range fil {
-		c.info[fi2.Path()] = fi2
+	if parsed {
+		c.updateListed(p, fil)
 	}
 	if apt.IsMeta(p) {
 		_, ok := c.info[p]
@@ -441,6 +449,39 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	log.Info("downloaded and cached", map[string]interface{}{
 		"path": p,
 	})
+}
+
+// updateListed registers fil as the items listed in the meta data file p,
+// replacing the items registered for the previous version of p.
+// Items no longer listed in any meta data file are removed from c.info.
+//
+// c.fiLock must be held for writing unless c is under construction.
+func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
+	paths := make([]string, 0, len(fil))
+	for _, fi := range fil {
+		paths = append(paths, fi.Path())
+		c.info[fi.Path()] = fi
+	}
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+
+	for _, fp := range paths {
+		c.refs[fp]++
+	}
+	for _, fp := range c.listed[p] {
+		c.refs[fp]--
+		if c.refs[fp] > 0 {
+			continue
+		}
+		delete(c.refs, fp)
+		delete(c.info, fp)
+	}
+
+	if len(paths) == 0 {
+		delete(c.listed, p)
+		return
+	}
+	c.listed[p] = paths
 }
 
 // Get looks up a cached item, and if not found, downloads it

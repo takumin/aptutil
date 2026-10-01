@@ -46,8 +46,9 @@ not pointed to by any symlink in `dir`.  Other files and directories in
 there.  However, a directory you create must not be named like
 `.<mirror>.<timestamp>`.
 
-The mirror of a mirror removed from the configuration is kept while its
-symlink exists.  Remove the symlink to have it removed.
+A mirror removed from the configuration is kept, and no longer updated,
+while its symlink exists.  go-apt-mirror warns about such mirrors in its
+logs.  Remove the symlink to have the mirror removed.
 
 Proxy
 -----

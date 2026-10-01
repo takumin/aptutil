@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 - [mirror] Only old mirror directories named `.<mirror>.<timestamp>`
   are removed from `dir`; other files and directories put there are
   kept.
+- [mirror] Warn about mirrors removed from the configuration, which are
+  kept and no longer updated while their symlinks exist.
 
 ### Fixed
 - [cacher] A downloaded item that failed checksum validation was treated
@@ -74,6 +76,9 @@ All notable changes to this project will be documented in this file.
   Lines consisting solely of spaces and tabs are also treated as empty.
 - [mirror] A file missing or truncated in the current mirror made every
   later update fail; it is now downloaded again.
+- [mirror] A temporary symlink `<mirror>.tmp` left by an interrupted
+  update kept the mirror it pointed to from being removed; it is now
+  removed.
 - [cacher] An index downloaded while its Release was updated replaced
   the new one, causing hash sum mismatches until the next update of
   Release; it is now discarded and downloaded again.

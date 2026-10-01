@@ -23,6 +23,19 @@ const (
 // i.e. "." + id + "." + timestamp in timestampFormat.
 var mirrorDirName = regexp.MustCompile(`^\.[a-z0-9_-]+\.[0-9]{8}_[0-9]{6}$`)
 
+// tmpLinkName matches the names of temporary symlinks created by
+// replaceLink, i.e. id + ".tmp".
+var tmpLinkName = regexp.MustCompile(`^([a-z0-9_-]+)\.tmp$`)
+
+// isMirrorTarget returns true if target is the path to a mirror of id
+// as symlinked by replaceLink, i.e. "." + id + "." + timestamp + "/" + id.
+func isMirrorTarget(target, id string) bool {
+	d := filepath.Base(filepath.Dir(target))
+	return filepath.Base(target) == id &&
+		mirrorDirName.MatchString(d) &&
+		strings.HasPrefix(d, "."+id+".")
+}
+
 // updateMirrors updates mirrors independently so that a failure of
 // one mirror does not stop updating the others.  It returns an error
 // if any of them failed.
@@ -87,6 +100,11 @@ func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 //
 // Only directories created by NewMirror are removed so that other files
 // in c.Dir, such as those put by the administrator, are kept.
+// Temporary symlinks left by interrupted replaceLink are also removed.
+//
+// Mirrors not in c.Mirrors are kept while their symlinks exist, as
+// they may be excluded from the configuration only for a while.
+// They are just warned as they are no longer updated.
 func gc(ctx context.Context, c *Config) error {
 	using := make(map[string]bool)
 
@@ -100,7 +118,27 @@ func gc(ctx context.Context, c *Config) error {
 		if (dentry.Type() & os.ModeSymlink) == 0 {
 			continue
 		}
-		using[dentry.Name()] = true
+		name := dentry.Name()
+		if target, err := os.Readlink(filepath.Join(c.Dir, name)); err == nil {
+			if m := tmpLinkName.FindStringSubmatch(name); m != nil && isMirrorTarget(target, m[1]) {
+				// replaceLink was interrupted.  No update is running
+				// as gc runs after them while holding the lock file.
+				p := filepath.Join(c.Dir, name)
+				log.Info("removing a stale temporary symlink", map[string]interface{}{
+					"path": p,
+				})
+				if err := os.Remove(p); err != nil {
+					return errors.Wrap(err, "gc")
+				}
+				continue
+			}
+			if _, ok := c.Mirrors[name]; !ok && isMirrorTarget(target, name) {
+				log.Warn("keeping a mirror not in the configuration; remove the symlink to remove it", map[string]interface{}{
+					"path": filepath.Join(c.Dir, name),
+				})
+			}
+		}
+		using[name] = true
 		p, err := filepath.EvalSymlinks(filepath.Join(c.Dir, dentry.Name()))
 		if err != nil {
 			// a broken symlink should not stop removing other old mirrors.

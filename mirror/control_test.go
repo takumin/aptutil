@@ -77,6 +77,66 @@ func TestGCKeepsOtherFiles(t *testing.T) {
 	}
 }
 
+func TestGCRemovesStaleTmpLink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{".ubuntu.20260101_000000/ubuntu", ".ubuntu.20260102_000000/ubuntu", "other"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	links := map[string]string{
+		"ubuntu":     ".ubuntu.20260101_000000/ubuntu",
+		"ubuntu.tmp": ".ubuntu.20260102_000000/ubuntu",
+		"other.tmp":  "other",
+	}
+	for name, target := range links {
+		if err := os.Symlink(filepath.Join(dir, target), filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := gc(context.Background(), &Config{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	// the stale temporary symlink and the mirror it pointed to are removed.
+	for _, name := range []string{"ubuntu.tmp", ".ubuntu.20260102_000000"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should be removed: %v", name, err)
+		}
+	}
+	// a symlink that happens to end with ".tmp" is kept.
+	for _, name := range []string{"ubuntu", ".ubuntu.20260101_000000", "other.tmp", "other"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s should be kept: %v", name, err)
+		}
+	}
+}
+
+func TestIsMirrorTarget(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		target, id string
+		want       bool
+	}{
+		{"/var/spool/go-apt-mirror/.ubuntu.20260101_000000/ubuntu", "ubuntu", true},
+		{".ubuntu.20260101_000000/ubuntu", "ubuntu", true},
+		{"/var/spool/go-apt-mirror/.ubuntu.20260101_000000/ubuntu", "security", false},
+		{"/var/spool/go-apt-mirror/.ubuntu-old.20260101_000000/ubuntu", "ubuntu", false},
+		{"/var/spool/go-apt-mirror/.ubuntu.20260101/ubuntu", "ubuntu", false},
+		{"/var/spool/go-apt-mirror/ubuntu", "ubuntu", false},
+		{"/srv/repo", "repo", false},
+	}
+	for _, tc := range cases {
+		if got := isMirrorTarget(tc.target, tc.id); got != tc.want {
+			t.Errorf("isMirrorTarget(%q, %q) = %v, want %v", tc.target, tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestUpdateMirrorsIsolatesFailures(t *testing.T) {
 	t.Parallel()
 

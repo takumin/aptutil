@@ -17,7 +17,7 @@ tasks:
     - task: yamlfmt
     - task: pinact
     - task: gomod
-    - task: gofmt
+    - task: golangci-lint
 
   yamlfmt:
     desc: '{{.TASK}}'
@@ -72,19 +72,24 @@ tasks:
     - cmd: touch .task/.done_{{.TASK}}
       silent: true
 
-  gofmt:
+  golangci-lint:
     desc: '{{.TASK}}'
     dir: '{{.ROOT_DIR}}'
     deps:
     - task: tool:aqua:tag:go
+    - task: tool:aqua:tag:golangci-lint
     sources:
+    - 'go.mod'
     - '**/*.go'
+    - '.golangci.yml'
+    - '.aqua/pkgs/golangci-lint.yaml'
     - exclude: '.git/**/*'
     - exclude: '.task/**/*'
     - exclude: 'dist/**/*'
     generates:
     - .task/.done_{{.TASK}}
     cmds:
-    - gofmt -s -w .
+    # Runs the formatters enabled in .golangci.yml (gofmt -s and gofumpt).
+    - golangci-lint fmt ./...
     - cmd: touch .task/.done_{{.TASK}}
       silent: true

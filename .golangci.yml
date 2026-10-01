@@ -38,6 +38,11 @@ linters:
       linters:
       - gosec
       text: G(401|501|505)
+formatters:
+  enable:
+  # gofmt is kept for its simplify (-s) rewrites, which gofumpt does not do.
+  - gofmt
+  - gofumpt
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

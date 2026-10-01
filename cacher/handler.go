@@ -38,7 +38,8 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case err != nil:
-		http.Error(w, err.Error(), status)
+		// do not expose internal errors such as file paths to clients.
+		http.Error(w, http.StatusText(status), status)
 	case status == http.StatusNotFound:
 		http.NotFound(w, r)
 	case status != http.StatusOK:
@@ -53,8 +54,12 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		stat, err := f.Stat()
 		if err != nil {
+			log.Error("failed to stat a cached item", map[string]interface{}{
+				"path":  p,
+				"error": err.Error(),
+			})
 			status = http.StatusInternalServerError
-			http.Error(w, err.Error(), status)
+			http.Error(w, http.StatusText(status), status)
 			return
 		}
 		ct := mime.TypeByExtension(path.Ext(p))

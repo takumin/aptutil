@@ -144,3 +144,60 @@ func TestMirrorExtractItemsByHashPartialChecksums(t *testing.T) {
 		t.Errorf("itemMap = %v, want pool/a.deb", itemMap)
 	}
 }
+
+func TestStorageReuseByHashPartialChecksums(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("foo")
+	fi := releaseFileInfo(t, "SHA256", data)
+
+	// store an index, and save it as the previous mirror.
+	prev, err := NewStorage(t.TempDir(), "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(prev.Dir(), "tmp")
+	if err := os.WriteFile(f, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := prev.StoreLinkWithHash(fi, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := prev.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// reuse the index from the saved mirror like reuseOrDownload.
+	current, err := NewStorage(prev.Dir(), "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Load(); err != nil {
+		t.Fatal(err)
+	}
+	localfi, fullpath := current.Lookup(fi, true)
+	if localfi == nil {
+		t.Fatal("index is not reused")
+	}
+
+	s, err := NewStorage(t.TempDir(), "pre")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StoreLinkWithHash(localfi, fullpath); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]bool{fi.Path(): true, fi.SHA256Path(): true}
+	for p := range s.info {
+		if !want[p] {
+			t.Errorf("unexpected entry: %s", p)
+		}
+	}
+	byhash := filepath.Join(s.Dir(), "pre", path.Dir(fi.Path()), "by-hash")
+	for _, name := range []string{"SHA1", "MD5Sum"} {
+		if _, err := os.Stat(filepath.Join(byhash, name)); !os.IsNotExist(err) {
+			t.Errorf("by-hash/%s must not exist: %v", name, err)
+		}
+	}
+}

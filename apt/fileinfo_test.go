@@ -147,6 +147,47 @@ func testFileInfoJSON(t *testing.T) {
 	}
 }
 
+func testFileInfoJSONMissingChecksums(t *testing.T) {
+	t.Parallel()
+
+	// Release files of Debian and Ubuntu have no SHA1 field.
+	fi := &FileInfo{
+		path:      "dists/s/main/binary-amd64/Packages",
+		size:      3,
+		md5sum:    []byte{0x01},
+		sha256sum: []byte{0x02},
+	}
+	j, err := json.Marshal(fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fi2 := new(FileInfo)
+	err = json.Unmarshal(j, fi2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fi2.sha1sum != nil {
+		t.Errorf("sha1sum = %#v, want nil", fi2.sha1sum)
+	}
+	if p := fi2.SHA1Path(); p != "" {
+		t.Errorf("SHA1Path() = %q, want empty", p)
+	}
+	if !fi.Same(fi2) || !fi2.Same(fi) {
+		t.Error("FileInfo changed by JSON round trip")
+	}
+
+	fi3 := new(FileInfo)
+	err = json.Unmarshal([]byte(`{"Path":"a","Size":0}`), fi3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi3.HasChecksum() {
+		t.Error("FileInfo without checksums must not have checksums")
+	}
+}
+
 func testFileInfoAddPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -237,6 +278,7 @@ func testFileInfoCopy(t *testing.T) {
 func TestFileInfo(t *testing.T) {
 	t.Run("Same", testFileInfoSame)
 	t.Run("JSON", testFileInfoJSON)
+	t.Run("JSONMissingChecksums", testFileInfoJSONMissingChecksums)
 	t.Run("AddPrefix", testFileInfoAddPrefix)
 	t.Run("Checksum", testFileInfoChecksum)
 	t.Run("Copy", testFileInfoCopy)

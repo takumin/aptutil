@@ -147,15 +147,15 @@ func (fi *FileInfo) UnmarshalJSON(data []byte) error {
 	}
 	fi.path = fij.Path
 	fi.size = uint64(fij.Size) //nolint:gosec // G115: Size is produced by MarshalJSON and is non-negative
-	md5sum, err := hex.DecodeString(fij.MD5Sum)
+	md5sum, err := decodeChecksum(fij.MD5Sum)
 	if err != nil {
 		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
 	}
-	sha1sum, err := hex.DecodeString(fij.SHA1Sum)
+	sha1sum, err := decodeChecksum(fij.SHA1Sum)
 	if err != nil {
 		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
 	}
-	sha256sum, err := hex.DecodeString(fij.SHA256Sum)
+	sha256sum, err := decodeChecksum(fij.SHA256Sum)
 	if err != nil {
 		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
 	}
@@ -163,6 +163,16 @@ func (fi *FileInfo) UnmarshalJSON(data []byte) error {
 	fi.sha1sum = sha1sum
 	fi.sha256sum = sha256sum
 	return nil
+}
+
+// decodeChecksum decodes a hex-encoded checksum written by MarshalJSON.
+// An empty string, which MarshalJSON writes for a missing checksum, is
+// decoded to nil so that the checksum stays missing.
+func decodeChecksum(s string) ([]byte, error) {
+	if s == "" {
+		return nil, nil
+	}
+	return hex.DecodeString(s)
 }
 
 // CopyWithFileInfo copies from src to dst until either EOF is reached

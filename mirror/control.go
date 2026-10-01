@@ -4,6 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cybozu-go/log"
@@ -15,14 +18,30 @@ const (
 	lockFilename = ".lock"
 )
 
+// updateMirrors updates mirrors independently so that a failure of
+// one mirror does not stop updating the others.  It returns an error
+// if any of them failed.
 func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	t := time.Now()
+
+	var mu sync.Mutex
+	var failed []string
+	fail := func(id string, err error) {
+		log.Error("update failed", map[string]interface{}{
+			"repo":  id,
+			"error": err.Error(),
+		})
+		mu.Lock()
+		failed = append(failed, id)
+		mu.Unlock()
+	}
 
 	var ml []*Mirror
 	for _, id := range mirrors {
 		m, err := NewMirror(t, id, c)
 		if err != nil {
-			return err
+			fail(id, err)
+			continue
 		}
 		ml = append(ml, m)
 	}
@@ -33,15 +52,26 @@ func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	env := well.NewEnvironment(ctx)
 
 	for _, m := range ml {
-		env.Go(m.Update)
+		env.Go(func(ctx context.Context) error {
+			if err := m.Update(ctx); err != nil {
+				fail(m.id, err)
+			}
+			return nil
+		})
 	}
 	env.Stop()
 	err := env.Wait()
 	if err != nil {
-		log.Error("update failed", map[string]interface{}{
-			"error": err.Error(),
-		})
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if len(failed) > 0 {
+		sort.Strings(failed)
+		return errors.Errorf("failed to update %d of %d mirrors: %s",
+			len(failed), len(mirrors), strings.Join(failed, ", "))
 	}
 
 	log.Info("update ends", nil)

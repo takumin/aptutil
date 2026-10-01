@@ -2,8 +2,11 @@ package mirror
 
 import (
 	"context"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,5 +43,50 @@ func TestGCBrokenSymlink(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".ubuntu.20250101_000000")); !os.IsNotExist(err) {
 		t.Errorf("old mirror should be removed: %v", err)
+	}
+}
+
+func TestUpdateMirrorsIsolatesFailures(t *testing.T) {
+	t.Parallel()
+
+	repo := flatRepo(map[string]string{"a.deb": "a"})
+	repo["a.deb"] = "a"
+	good := serveRepo(t, repo)
+	// no Release is found.
+	bad := serveRepo(t, map[string]string{})
+
+	mirrConfig := func(srv *httptest.Server) *MirrConfig {
+		u, err := url.Parse(srv.URL + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &MirrConfig{URL: tomlURL{u}, Suites: []string{"/"}}
+	}
+	c := NewConfig()
+	c.Dir = t.TempDir()
+	c.Mirrors = map[string]*MirrConfig{
+		"good": mirrConfig(good),
+		"bad":  mirrConfig(bad),
+		// an invalid configuration fails before starting updates.
+		"invalid": {URL: tomlURL{&url.URL{Scheme: "http", Host: "localhost"}}},
+	}
+
+	err := updateMirrors(context.Background(), c, []string{"good", "bad", "invalid"})
+	if err == nil {
+		t.Fatal("updateMirrors must fail")
+	}
+	if !strings.Contains(err.Error(), "bad, invalid") {
+		t.Errorf("err = %v, want failed mirrors listed", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(c.Dir, "good", "a.deb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a" {
+		t.Errorf("a.deb = %q, want %q", data, "a")
+	}
+	if _, err := os.Lstat(filepath.Join(c.Dir, "bad")); !os.IsNotExist(err) {
+		t.Errorf("bad must not be published: %v", err)
 	}
 }

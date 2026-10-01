@@ -1,0 +1,5 @@
+---
+packages:
+- name: go-task/task@v3.53.1
+  tags:
+  - reviewdog

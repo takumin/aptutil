@@ -17,7 +17,8 @@ import (
 )
 
 // flatRepo returns the files of a flat repository whose Packages lists
-// the given items with their contents.
+// the given items with their contents.  Release.gpg is a dummy as
+// signatures are not verified.
 func flatRepo(items map[string]string) map[string]string {
 	sha256hex := func(s string) string {
 		sum := sha256.Sum256([]byte(s))
@@ -33,8 +34,9 @@ func flatRepo(items map[string]string) map[string]string {
 	release := fmt.Sprintf("SHA256:\n %s %d Packages\n", sha256hex(packages), len(packages))
 
 	return map[string]string{
-		"Release":  release,
-		"Packages": packages,
+		"Release":     release,
+		"Release.gpg": "dummy",
+		"Packages":    packages,
 	}
 }
 

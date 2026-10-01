@@ -574,6 +574,7 @@ func (m *Mirror) handleReleaseResults(results <-chan *dlResult) (*releaseFile, e
 		return nil, errors.Wrap(r.err, "download")
 	}
 
+	// some servers such as Amazon S3 return 403 for missing files.
 	if 400 <= r.status && r.status < 500 {
 		// return no error to continue
 		return nil, nil
@@ -596,6 +597,12 @@ func (m *Mirror) handleReleaseResults(results <-chan *dlResult) (*releaseFile, e
 	return &releaseFile{path: r.path, fil: fil, d: d}, nil
 }
 
+// downloadRelease downloads release files of a suite, and returns the
+// indices listed in them and whether they support by-hash retrieval.
+//
+// Unless allowed by the configuration, the release files must be
+// signed by InRelease or Release.gpg, so that a mirror is not
+// published without signatures when they fail to download.
 func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string][]*apt.FileInfo, bool, error) {
 	releases := m.mc.ReleaseFiles(suite)
 	results := make(chan *dlResult, len(releases))
@@ -609,6 +616,7 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	}
 
 	byhash := true
+	found := make(map[string]bool)
 	filMap := make(map[string][]*apt.FileInfo)
 	for i := 0; i < len(releases); i++ {
 		rf, err := m.handleReleaseResults(results)
@@ -619,7 +627,13 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 			continue
 		}
 
-		if byhash && path.Base(rf.path) != "Release.gpg" {
+		base := path.Base(rf.path)
+		found[base] = true
+		if base == "Release.gpg" {
+			continue
+		}
+
+		if byhash {
 			byhash = apt.SupportByHash(rf.d)
 		}
 		for _, fi := range rf.fil {
@@ -628,6 +642,15 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 				return nil, byhash, err
 			}
 		}
+	}
+
+	if !found["Release"] && !found["InRelease"] {
+		return nil, false, errors.New("found no Release/InRelease for " + suite)
+	}
+	signed := found["InRelease"] || (found["Release"] && found["Release.gpg"])
+	if !signed && !m.mc.AllowUnsigned {
+		return nil, false, errors.New("found neither InRelease nor Release.gpg for " + suite +
+			"; set allow_unsigned to mirror unsigned repositories")
 	}
 
 	return filMap, byhash, nil

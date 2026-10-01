@@ -115,8 +115,7 @@ func TestMirrorDownloadCancelDuringBackoff(t *testing.T) {
 func TestMirrorUnlimitedConns(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.NotFoundHandler())
-	defer srv.Close()
+	srv := serveRepo(t, map[string]string{"dists/s/InRelease": "Origin: test\n"})
 
 	u, err := url.Parse(srv.URL + "/")
 	if err != nil {

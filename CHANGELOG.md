@@ -26,6 +26,8 @@ All notable changes to this project will be documented in this file.
   kept.
 - [mirror] Warn about mirrors removed from the configuration, which are
   kept and no longer updated while their symlinks exist.
+- [mirror] A mirror without `InRelease` nor `Release.gpg` is no longer
+  published unless the new `allow_unsigned` option is set for it.
 
 ### Fixed
 - [cacher] A downloaded item that failed checksum validation was treated

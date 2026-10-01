@@ -21,6 +21,8 @@ format = "plain"
 # sections:      List of sections to mirror.  see sources.list(5).
 # mirror_source: true to mirror source archives.  Default is false.
 # architectures: List of architectures to mirror.  "all" is always mirrored.
+# allow_unsigned: true to mirror repositories without InRelease nor
+#                 Release.gpg.  Default is false.
 [mirror.ubuntu]
 url = "http://archive.ubuntu.com/ubuntu"
 suites = ["trusty", "trusty-updates"]

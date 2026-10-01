@@ -46,6 +46,7 @@ type MirrConfig struct {
 	Sections      []string `toml:"sections"`
 	Source        bool     `toml:"mirror_source"`
 	Architectures []string `toml:"architectures"`
+	AllowUnsigned bool     `toml:"allow_unsigned"`
 }
 
 // isFlat returns true if suite ends with "/" as described in

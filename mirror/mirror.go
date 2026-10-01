@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
@@ -300,6 +301,11 @@ func (m *Mirror) updateSuite(ctx context.Context, suite string, itemMap map[stri
 
 	// download (or reuse) all indices
 	indices, err := m.downloadIndices(ctx, indexMap, byhash)
+	if err != nil {
+		return errors.Wrap(err, m.id)
+	}
+
+	err = m.checkIndices(indexMap, indices)
 	if err != nil {
 		return errors.Wrap(err, m.id)
 	}
@@ -655,6 +661,34 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	}
 
 	return filMap, byhash, nil
+}
+
+// checkIndices checks that every Packages or Sources index to be
+// scanned for items is available in at least one supported format,
+// so that a mirror is not published without the items listed in it.
+func (m *Mirror) checkIndices(indexMap map[string]*apt.FileInfo, indices []*apt.FileInfo) error {
+	available := make(map[string]bool)
+	for _, fi := range indices {
+		p := fi.Path()
+		if apt.IsSupported(p) {
+			available[strings.TrimSuffix(p, path.Ext(p))] = true
+		}
+	}
+
+	for p := range indexMap {
+		if !m.mc.MatchingIndex(p) {
+			continue
+		}
+		switch rawName(p) {
+		case "Packages", "Sources":
+		default:
+			continue
+		}
+		if !available[strings.TrimSuffix(p, path.Ext(p))] {
+			return errors.New("no index available for " + p)
+		}
+	}
+	return nil
 }
 
 func (m *Mirror) downloadIndices(ctx context.Context,

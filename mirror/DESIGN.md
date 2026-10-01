@@ -45,7 +45,9 @@ published mirrors are always complete and consistent with signed
 download, the update of the mirror fails, and the previous mirror stays
 published.  Indices listed in `Release` but not found in the upstream
 server are tolerated, as `Release` usually lists indices in compression
-formats that are not served.
+formats that are not served.  However, every `Packages` or `Sources`
+index scanned for items must be available in at least one supported
+compression format.
 
 To make the mirror consistent, the update also fails if:
 

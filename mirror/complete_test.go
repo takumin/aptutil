@@ -1,11 +1,16 @@
 package mirror
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,6 +35,31 @@ func updateOnce(t *testing.T, files map[string]string, suites []string, allowUns
 		t.Fatal(err)
 	}
 	return filepath.Join(c.Dir, "test"), m.Update(context.Background())
+}
+
+// releaseOf returns a Release file listing the given indices.
+func releaseOf(indices map[string]string) string {
+	var b strings.Builder
+	b.WriteString("SHA256:\n")
+	for name, data := range indices {
+		sum := sha256.Sum256([]byte(data))
+		fmt.Fprintf(&b, " %s %d %s\n", hex.EncodeToString(sum[:]), len(data), name)
+	}
+	return b.String()
+}
+
+func gzipped(t *testing.T, s string) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write([]byte(s)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
 }
 
 func TestMirrorRequiresSignature(t *testing.T) {
@@ -127,5 +157,79 @@ func TestMirrorConsistentReleases(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+func TestMirrorMissingIndex(t *testing.T) {
+	t.Parallel()
+
+	packages := "Package: a\nFilename: a.deb\nSize: 1\n"
+	packagesGz := gzipped(t, packages)
+
+	testCases := []struct {
+		name    string
+		listed  map[string]string
+		served  []string
+		wantErr bool
+	}{
+		{
+			name:   "all formats",
+			listed: map[string]string{"Packages": packages, "Packages.gz": packagesGz},
+			served: []string{"Packages", "Packages.gz"},
+		},
+		{
+			name:   "only gz",
+			listed: map[string]string{"Packages": packages, "Packages.gz": packagesGz},
+			served: []string{"Packages.gz"},
+		},
+		{
+			name:    "none",
+			listed:  map[string]string{"Packages": packages, "Packages.gz": packagesGz},
+			wantErr: true,
+		},
+		{
+			name:    "only unsupported format",
+			listed:  map[string]string{"Packages.zst": "zstd"},
+			served:  []string{"Packages.zst"},
+			wantErr: true,
+		},
+		{
+			// indices not scanned for items may be missing.
+			name:   "not scanned",
+			listed: map[string]string{"Packages": packages, "Contents-amd64": "contents"},
+			served: []string{"Packages"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files := map[string]string{
+				"Release":     releaseOf(tc.listed),
+				"Release.gpg": "dummy",
+				"a.deb":       "a",
+			}
+			for _, p := range tc.served {
+				files[p] = tc.listed[p]
+			}
+
+			dir, err := updateOnce(t, files, []string{"/"}, false)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("update must fail")
+				}
+				if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+					t.Errorf("mirror must not be published: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "a.deb")); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 }

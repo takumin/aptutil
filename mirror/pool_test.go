@@ -127,3 +127,65 @@ func TestMirrorPoolUpdateFailureKeepsOldMirror(t *testing.T) {
 		t.Errorf("mirror directories = %v, want only the old one", dirs)
 	}
 }
+
+func TestMirrorUpdateRedownloadsMissingFile(t *testing.T) {
+	t.Parallel()
+
+	files := flatRepo(map[string]string{"a.deb": "a"})
+	files["a.deb"] = "a"
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "a.deb" {
+			hits.Add(1)
+		}
+		data, ok := files[p]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(data))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewConfig()
+	c.Dir = t.TempDir()
+	c.Mirrors = map[string]*MirrConfig{
+		"test": {URL: tomlURL{u}, Suites: []string{"/"}},
+	}
+	update := func(tm time.Time) error {
+		m, err := NewMirror(tm, "test", c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.Update(context.Background())
+	}
+
+	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := update(t1); err != nil {
+		t.Fatal(err)
+	}
+
+	// a file of the current mirror is removed by hand.
+	if err := os.Remove(filepath.Join(c.Dir, "test", "a.deb")); err != nil {
+		t.Fatal(err)
+	}
+	if err := update(t1.Add(time.Hour)); err != nil {
+		t.Fatalf("update must download the missing file again: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(c.Dir, "test", "a.deb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a" {
+		t.Errorf("a.deb = %q, want %q", data, "a")
+	}
+	if n := hits.Load(); n != 2 {
+		t.Errorf("a.deb was downloaded %d times, want 2", n)
+	}
+}

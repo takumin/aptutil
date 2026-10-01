@@ -69,6 +69,8 @@ All notable changes to this project will be documented in this file.
 - Paragraphs after consecutive empty lines in indices were silently
   ignored, so go-apt-mirror missed the packages listed in them.
   Lines consisting solely of spaces and tabs are also treated as empty.
+- [mirror] A file missing or truncated in the current mirror made every
+  later update fail; it is now downloaded again.
 
 ### Security
 - [cacher] Set `ReadHeaderTimeout` on the HTTP server to limit slow

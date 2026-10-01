@@ -3,6 +3,7 @@ package mirror
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func testStorageLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s2, err := NewStorage(d, "ubuntu")
+	s2, err := NewStorage(d, "pre")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +155,29 @@ func testStorageLookup(t *testing.T) {
 	fi7, _ := s2.Lookup(fi, false)
 	if fi7 != nil {
 		t.Error(`fi7 != nil`)
+	}
+
+	// files recorded in info.json but missing or truncated on disk
+	// are not found so that they are downloaded again.
+	if err := os.Remove(filepath.Join(d, "pre", "def")); err != nil {
+		t.Fatal(err)
+	}
+	fi, err = makeFileInfo("def", files["def"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi8, _ := s2.Lookup(fi, false); fi8 != nil {
+		t.Error(`a missing file must not be found`)
+	}
+	if err := os.Truncate(filepath.Join(d, "pre", "a", "b", "c"), 1); err != nil {
+		t.Fatal(err)
+	}
+	fi, err = makeFileInfo("a/b/c", files["a/b/c"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi9, _ := s2.Lookup(fi, false); fi9 != nil {
+		t.Error(`a truncated file must not be found`)
 	}
 }
 

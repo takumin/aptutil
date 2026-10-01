@@ -212,16 +212,25 @@ func (s *Storage) StoreLinkWithHash(fi *apt.FileInfo, fullpath string) error {
 //
 // If a file matching fi exists, its info and full path is returned.
 // Otherwise, nil and empty string is returned.
+//
+// A file recorded in info.json is not found if it is missing or its
+// size differs on disk, e.g. removed by hand, so that it is downloaded
+// again instead of failing to be reused forever.
 func (s *Storage) Lookup(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, string) {
 	f := func(p string) (*apt.FileInfo, string) {
 		s.mu.RLock()
-		defer s.mu.RUnlock()
-
 		fi2, ok := s.info[p]
+		s.mu.RUnlock()
 		if !ok || !fi.Same(fi2) {
 			return nil, ""
 		}
-		return fi2, filepath.Join(s.dir, s.prefix, filepath.Clean(p))
+
+		fullpath := filepath.Join(s.dir, s.prefix, filepath.Clean(p))
+		st, err := os.Lstat(fullpath)
+		if err != nil || !st.Mode().IsRegular() || uint64(st.Size()) != fi2.Size() { //nolint:gosec // G115: regular file sizes are non-negative
+			return nil, ""
+		}
+		return fi2, fullpath
 	}
 
 	if hp := byHashPath(fi); byhash && hp != "" {

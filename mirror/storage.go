@@ -90,7 +90,7 @@ func (s *Storage) Save() error {
 	defer s.mu.Unlock()
 
 	infoPath := filepath.Join(s.dir, infoJSON)
-	f, err := os.OpenFile(infoPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644) //nolint:gosec // G304: info file lives in the storage directory
+	f, err := os.OpenFile(infoPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644) //nolint:gosec // G304: info file lives in the storage directory
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (s *Storage) StoreLink(fi *apt.FileInfo, fullpath string) error {
 	fp := filepath.Join(s.dir, s.prefix, filepath.Clean(p))
 	d := filepath.Dir(fp)
 
-	err := os.MkdirAll(d, 0755)
+	err := os.MkdirAll(d, 0o755)
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func (s *Storage) StoreLinkWithHash(fi *apt.FileInfo, fullpath string) error {
 
 	for _, fp := range fpl {
 		d := filepath.Dir(fp)
-		err := os.MkdirAll(d, 0755)
+		err := os.MkdirAll(d, 0o755)
 		if err != nil {
 			return errors.Wrap(err, "StoreLinkWithHash: "+fp)
 		}

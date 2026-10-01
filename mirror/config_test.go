@@ -48,7 +48,8 @@ func TestConfig(t *testing.T) {
 			t.Error(`!reflect.DeepEqual(ubuntu.Architectures)`)
 		}
 		if !reflect.DeepEqual(ubuntu.Suites, []string{
-			"trusty", "trusty-updates"}) {
+			"trusty", "trusty-updates",
+		}) {
 			t.Error(`!reflect.DeepEqual(ubuntu.Suites)`)
 		}
 		if !reflect.DeepEqual(ubuntu.Sections, []string{
@@ -77,7 +78,8 @@ func TestConfig(t *testing.T) {
 			t.Error(`!reflect.DeepEqual(security.Suites)`)
 		}
 		if !reflect.DeepEqual(security.Sections, []string{
-			"main", "restricted", "universe"}) {
+			"main", "restricted", "universe",
+		}) {
 			t.Error(`!reflect.DeepEqual(security.Sections)`)
 		}
 	}

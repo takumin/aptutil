@@ -37,7 +37,6 @@ func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	}
 	env.Stop()
 	err := env.Wait()
-
 	if err != nil {
 		log.Error("update failed", map[string]interface{}{
 			"error": err.Error(),
@@ -112,7 +111,7 @@ func Run(c *Config, mirrors []string) error {
 	f, err := os.Open(lockFile) //nolint:gosec // G304: lock file lives in the configured mirror directory
 	switch {
 	case os.IsNotExist(err):
-		f2, err := os.OpenFile(lockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644) //nolint:gosec // G304: lock file lives in the configured mirror directory
+		f2, err := os.OpenFile(lockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: lock file lives in the configured mirror directory
 		if err != nil {
 			return err
 		}

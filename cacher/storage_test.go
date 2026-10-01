@@ -216,14 +216,14 @@ func TestStorageLoad(t *testing.T) {
 	dir := t.TempDir()
 
 	for k, v := range files {
-		err := os.WriteFile(filepath.Join(dir, k+fileSuffix), v, 0644)
+		err := os.WriteFile(filepath.Join(dir, k+fileSuffix), v, 0o644)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// dummy should be ignored as it does not have a proper suffix.
-	err := os.WriteFile(filepath.Join(dir, "dummy"), []byte{'d'}, 0644)
+	err := os.WriteFile(filepath.Join(dir, "dummy"), []byte{'d'}, 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}

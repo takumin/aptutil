@@ -66,7 +66,7 @@ func NewStorage(dir string, capacity uint64) *Storage {
 	}
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err = os.MkdirAll(dir, 0755)
+		err = os.MkdirAll(dir, 0o755)
 		if err != nil {
 			panic("Storage.NewStorage: failed to create " + dir)
 		}
@@ -223,7 +223,7 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	_, err := os.Stat(dirpath) //nolint:gosec // G703: p is validated to stay within cm.dir
 	switch {
 	case os.IsNotExist(err):
-		err = os.MkdirAll(dirpath, 0755) //nolint:gosec // G703: p is validated to stay within cm.dir
+		err = os.MkdirAll(dirpath, 0o755) //nolint:gosec // G703: p is validated to stay within cm.dir
 		if err != nil {
 			return err
 		}

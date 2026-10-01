@@ -23,9 +23,7 @@ const (
 	httpRetries      = 5
 )
 
-var (
-	validID = regexp.MustCompile(`^[a-z0-9_-]+$`)
-)
+var validID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // Mirror implements mirroring logics.
 type Mirror struct {
@@ -73,7 +71,7 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 	}
 
 	d := filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
-	err = os.Mkdir(d, 0755)
+	err = os.Mkdir(d, 0o755)
 	if err != nil {
 		return nil, errors.Wrap(err, id)
 	}
@@ -293,8 +291,8 @@ func closeAndRemoveFile(f *os.File) {
 
 // download is a goroutine to download an item.
 func (m *Mirror) download(ctx context.Context,
-	p string, fi *apt.FileInfo, byhash bool, ch chan<- *dlResult) {
-
+	p string, fi *apt.FileInfo, byhash bool, ch chan<- *dlResult,
+) {
 	var tempfile *os.File
 	r := &dlResult{
 		path: p,
@@ -399,7 +397,7 @@ RETRY:
 		r.err = errors.New("tempfile.Sync failed")
 		return
 	}
-	err = os.Chmod(tempfile.Name(), 0644)
+	err = os.Chmod(tempfile.Name(), 0o644)
 	if err != nil {
 		r.err = errors.New("os.Chmod(tempfile.Name(), 0644) failed")
 		return
@@ -518,7 +516,8 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 }
 
 func (m *Mirror) downloadIndices(ctx context.Context,
-	filMap map[string][]*apt.FileInfo, byhash bool) ([]*apt.FileInfo, error) {
+	filMap map[string][]*apt.FileInfo, byhash bool,
+) ([]*apt.FileInfo, error) {
 	var fil []*apt.FileInfo
 	for _, fil2 := range filMap {
 		fil = append(fil, fil2...)
@@ -533,7 +532,8 @@ func (m *Mirror) downloadIndices(ctx context.Context,
 }
 
 func (m *Mirror) downloadItems(ctx context.Context,
-	fiMap map[string]*apt.FileInfo) ([]*apt.FileInfo, error) {
+	fiMap map[string]*apt.FileInfo,
+) ([]*apt.FileInfo, error) {
 	fil := make([]*apt.FileInfo, 0, len(fiMap))
 	for _, fi := range fiMap {
 		fil = append(fil, fi)
@@ -542,8 +542,8 @@ func (m *Mirror) downloadItems(ctx context.Context,
 }
 
 func (m *Mirror) downloadFiles(ctx context.Context,
-	fil []*apt.FileInfo, allowMissing, byhash bool) ([]*apt.FileInfo, error) {
-
+	fil []*apt.FileInfo, allowMissing, byhash bool,
+) ([]*apt.FileInfo, error) {
 	results := make(chan *dlResult, len(fil))
 	var reused, downloaded []*apt.FileInfo
 
@@ -576,8 +576,8 @@ func (m *Mirror) downloadFiles(ctx context.Context,
 }
 
 func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
-	byhash bool, results chan<- *dlResult) ([]*apt.FileInfo, error) {
-
+	byhash bool, results chan<- *dlResult,
+) ([]*apt.FileInfo, error) {
 	// environment to manage downloading goroutines.
 	env := well.NewEnvironment(ctx)
 

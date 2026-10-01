@@ -14,9 +14,7 @@ const (
 	defaultConfigPath = "/etc/apt/mirror.toml"
 )
 
-var (
-	configPath = flag.String("f", defaultConfigPath, "configuration file name")
-)
+var configPath = flag.String("f", defaultConfigPath, "configuration file name")
 
 func main() {
 	flag.Parse()

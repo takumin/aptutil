@@ -27,3 +27,6 @@ runner:
   govet:
     cmd: go vet ./...
     format: govet
+  golangci-lint:
+    cmd: golangci-lint run --show-stats=false --output.checkstyle.path=stdout ./...
+    format: checkstyle

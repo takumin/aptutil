@@ -32,6 +32,7 @@ tasks:
     - task: ghalint-act
     - task: zizmor
     - task: govet
+    - task: golangci-lint
 
   matrix:
     desc: '{{.TASK}}'
@@ -150,6 +151,27 @@ tasks:
     # Fingerprint the pinned toolchain so bumping Go re-runs vet locally
     # instead of being skipped on a stale .task/.done_* marker.
     - '.aqua/pkgs/go.yaml'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - task: reviewdog
+      vars:
+        REVIEWDOG_RUNNER: '{{splitList ":" .TASK | last}}'
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true
+
+  golangci-lint:
+    desc: '{{.TASK}}'
+    deps:
+    - task: tool:go:mod:download
+    - task: tool:aqua:tag:golangci-lint
+    sources:
+    - 'go.mod'
+    - 'go.sum'
+    - '**/*.go'
+    - '.golangci.yml'
+    - '.aqua/pkgs/go.yaml'
+    - '.aqua/pkgs/golangci-lint.yaml'
     generates:
     - .task/.done_{{.TASK}}
     cmds:

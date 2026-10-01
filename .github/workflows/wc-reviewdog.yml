@@ -57,7 +57,7 @@ jobs:
         aqua_version: v2.63.0
         aqua_opts: -t reviewdog,${{ matrix.name }}
     - name: Restore go mod cache
-      if: matrix.name == 'govet'
+      if: matrix.name == 'govet' || matrix.name == 'golangci-lint'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: go-mod-${{ hashFiles('**/go.sum') }}
@@ -65,7 +65,7 @@ jobs:
           go-mod-
         path: ~/go/pkg/mod/
     - name: Restore go build cache
-      if: matrix.name == 'govet'
+      if: matrix.name == 'govet' || matrix.name == 'golangci-lint'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: go-build-test-${{ hashFiles('.aqua/pkgs/go.yaml', '**/go.sum') }}

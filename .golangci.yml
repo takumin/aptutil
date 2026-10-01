@@ -1,0 +1,21 @@
+---
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+# https://golangci-lint.run/docs/configuration/file/
+version: '2'
+run:
+  timeout: 5m
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Logging failures are not actionable; ignore errors returned by the
+      # cybozu-go/log package-level helpers.
+      exclude-functions:
+      - github.com/cybozu-go/log.Debug
+      - github.com/cybozu-go/log.Info
+      - github.com/cybozu-go/log.Warn
+      - github.com/cybozu-go/log.Error
+      - github.com/cybozu-go/log.Critical
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

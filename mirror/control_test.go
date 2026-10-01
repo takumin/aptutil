@@ -46,6 +46,37 @@ func TestGCBrokenSymlink(t *testing.T) {
 	}
 }
 
+func TestGCKeepsOtherFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{".ubuntu.20250101_000000/ubuntu", "internal/pool", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"index.html", ".lock", ".ubuntu.20250101_000001"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil { //nolint:gosec // G306: test files
+			t.Fatal(err)
+		}
+	}
+
+	if err := gc(context.Background(), &Config{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	// files not created by go-apt-mirror are kept, even a regular file
+	// whose name looks like a mirror directory.
+	for _, name := range []string{"internal/pool", ".hidden", "index.html", ".lock", ".ubuntu.20250101_000001"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s should be kept: %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".ubuntu.20250101_000000")); !os.IsNotExist(err) {
+		t.Errorf("old mirror should be removed: %v", err)
+	}
+}
+
 func TestUpdateMirrorsIsolatesFailures(t *testing.T) {
 	t.Parallel()
 

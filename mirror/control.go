@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,10 @@ import (
 const (
 	lockFilename = ".lock"
 )
+
+// mirrorDirName matches the names of directories created by NewMirror,
+// i.e. "." + id + "." + timestamp in timestampFormat.
+var mirrorDirName = regexp.MustCompile(`^\.[a-z0-9_-]+\.[0-9]{8}_[0-9]{6}$`)
 
 // updateMirrors updates mirrors independently so that a failure of
 // one mirror does not stop updating the others.  It returns an error
@@ -78,13 +83,12 @@ func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	return nil
 }
 
-// gc removes old mirror files, if any.
+// gc removes old mirror directories, if any.
+//
+// Only directories created by NewMirror are removed so that other files
+// in c.Dir, such as those put by the administrator, are kept.
 func gc(ctx context.Context, c *Config) error {
-	using := map[string]bool{
-		lockFilename: true,
-		".":          true,
-		"..":         true,
-	}
+	using := make(map[string]bool)
 
 	dentries, err := os.ReadDir(c.Dir)
 	if err != nil {
@@ -109,9 +113,9 @@ func gc(ctx context.Context, c *Config) error {
 		using[filepath.Base(filepath.Dir(p))] = true
 	}
 
-	// remove unused dentries.
+	// remove unused mirror directories.
 	for _, dentry := range dentries {
-		if using[dentry.Name()] {
+		if using[dentry.Name()] || !dentry.IsDir() || !mirrorDirName.MatchString(dentry.Name()) {
 			continue
 		}
 

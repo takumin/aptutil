@@ -21,6 +21,9 @@ All notable changes to this project will be documented in this file.
   go-apt-mirror still exits with an error listing the failed mirrors.
 - [mirror] Local errors such as a full disk while downloading are no
   longer retried.
+- [mirror] Only old mirror directories named `.<mirror>.<timestamp>`
+  are removed from `dir`; other files and directories put there are
+  kept.
 
 ### Fixed
 - [cacher] A downloaded item that failed checksum validation was treated

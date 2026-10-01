@@ -23,6 +23,32 @@ The default location is `/etc/apt/mirror.toml`.
 
 A sample configuration file is available [here](mirror.toml).
 
+Directory layout
+----------------
+
+go-apt-mirror stores mirrors under `dir` in the configuration file as
+follows:
+
+```
+dir/
+├── .lock
+├── ubuntu -> .ubuntu.20260101_000000/ubuntu
+└── .ubuntu.20260101_000000/
+```
+
+Each update downloads a mirror into a new directory named
+`.<mirror>.<timestamp>`, then switches the symlink `<mirror>` to it.
+Clients should access mirrors through the symlinks.
+
+After updates, go-apt-mirror removes `.<mirror>.<timestamp>` directories
+not pointed to by any symlink in `dir`.  Other files and directories in
+`dir` are kept, so you may put files such as `index.html` or public keys
+there.  However, a directory you create must not be named like
+`.<mirror>.<timestamp>`.
+
+The mirror of a mirror removed from the configuration is kept while its
+symlink exists.  Remove the symlink to have it removed.
+
 Proxy
 -----
 

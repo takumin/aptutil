@@ -163,7 +163,7 @@ func (m *Mirror) storeLink(fi *apt.FileInfo, fp string, byhash bool) error {
 	return m.storage.StoreLink(fi, fp)
 }
 
-func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap map[string][]*apt.FileInfo, itemMap map[string]*apt.FileInfo, byhash bool) error {
+func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[string]*apt.FileInfo, byhash bool) error {
 	for _, index := range indices {
 		p := index.Path()
 		if !m.mc.MatchingIndex(p) || !apt.IsSupported(p) {
@@ -286,14 +286,14 @@ func (m *Mirror) updateSuite(ctx context.Context, suite string, itemMap map[stri
 	// for non-existent files such as Sources (looks like the body of
 	// Sources.gz is returned).
 	if !m.mc.Source {
-		tmpMap := make(map[string][]*apt.FileInfo)
-		for p, fil := range indexMap {
+		tmpMap := make(map[string]*apt.FileInfo)
+		for p, fi := range indexMap {
 			base := path.Base(p)
 			base = base[0 : len(base)-len(path.Ext(base))]
 			if base == "Sources" {
 				continue
 			}
-			tmpMap[p] = fil
+			tmpMap[p] = fi
 		}
 		indexMap = tmpMap
 	}
@@ -533,28 +533,6 @@ RETRY:
 	r.fi = fi2
 }
 
-func addFileInfoToList(fi *apt.FileInfo, m map[string][]*apt.FileInfo, byhash bool) error {
-	p := fi.Path()
-	fil, ok := m[p]
-	if !ok {
-		m[p] = []*apt.FileInfo{fi}
-		return nil
-	}
-
-	for _, existing := range fil {
-		if existing.Same(fi) {
-			return nil
-		}
-	}
-
-	// fi differs from all FileInfo in fil
-	if !byhash {
-		return errors.New("inconsistent checksum for " + p)
-	}
-	m[p] = append(fil, fi)
-	return nil
-}
-
 // releaseFile is a Release, Release.gpg, or InRelease file downloaded.
 type releaseFile struct {
 	path string
@@ -597,13 +575,31 @@ func (m *Mirror) handleReleaseResults(results <-chan *dlResult) (*releaseFile, e
 	return &releaseFile{path: r.path, fil: fil, d: d}, nil
 }
 
+// sameFileInfos returns true if filMap has exactly the files in fil.
+func sameFileInfos(filMap map[string]*apt.FileInfo, fil []*apt.FileInfo) bool {
+	if len(filMap) != len(fil) {
+		return false
+	}
+	for _, fi := range fil {
+		existing, ok := filMap[fi.Path()]
+		if !ok || existing.Conflicts(fi) {
+			return false
+		}
+	}
+	return true
+}
+
 // downloadRelease downloads release files of a suite, and returns the
 // indices listed in them and whether they support by-hash retrieval.
+//
+// Release and InRelease must list the same indices; otherwise they are
+// of different generations as the upstream is being updated, and
+// cannot make a consistent mirror.
 //
 // Unless allowed by the configuration, the release files must be
 // signed by InRelease or Release.gpg, so that a mirror is not
 // published without signatures when they fail to download.
-func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string][]*apt.FileInfo, bool, error) {
+func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]*apt.FileInfo, bool, error) {
 	releases := m.mc.ReleaseFiles(suite)
 	results := make(chan *dlResult, len(releases))
 
@@ -617,11 +613,12 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 
 	byhash := true
 	found := make(map[string]bool)
-	filMap := make(map[string][]*apt.FileInfo)
+	var first *releaseFile
+	filMap := make(map[string]*apt.FileInfo)
 	for i := 0; i < len(releases); i++ {
 		rf, err := m.handleReleaseResults(results)
 		if err != nil {
-			return nil, byhash, err
+			return nil, false, err
 		}
 		if rf == nil {
 			continue
@@ -636,11 +633,15 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 		if byhash {
 			byhash = apt.SupportByHash(rf.d)
 		}
-		for _, fi := range rf.fil {
-			err = addFileInfoToList(fi, filMap, byhash)
-			if err != nil {
-				return nil, byhash, err
+		if first == nil {
+			first = rf
+			for _, fi := range rf.fil {
+				filMap[fi.Path()] = fi
 			}
+			continue
+		}
+		if !sameFileInfos(filMap, rf.fil) {
+			return nil, false, errors.New("inconsistent indices in " + first.path + " and " + rf.path)
 		}
 	}
 
@@ -657,11 +658,11 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 }
 
 func (m *Mirror) downloadIndices(ctx context.Context,
-	filMap map[string][]*apt.FileInfo, byhash bool,
+	filMap map[string]*apt.FileInfo, byhash bool,
 ) ([]*apt.FileInfo, error) {
-	var fil []*apt.FileInfo
-	for _, fil2 := range filMap {
-		fil = append(fil, fil2...)
+	fil := make([]*apt.FileInfo, 0, len(filMap))
+	for _, fi := range filMap {
+		fil = append(fil, fi)
 	}
 
 	log.Info("download other indices", map[string]interface{}{

@@ -47,8 +47,15 @@ published.  Indices listed in `Release` but not found in the upstream
 server are tolerated, as `Release` usually lists indices in compression
 formats that are not served.
 
-The update also fails if neither `InRelease` nor `Release` with
-`Release.gpg` is found, unless `allow_unsigned` is set for the mirror.
+To make the mirror consistent, the update also fails if:
+
+- neither `InRelease` nor `Release` with `Release.gpg` is found, unless
+  `allow_unsigned` is set for the mirror, or
+- `Release` and `InRelease` list different indices, which happens when
+  they are downloaded while the upstream server is being updated.
+
+Signatures are not verified, so `Release.gpg` downloaded while the
+upstream server is being updated may not match `Release`.
 
 Checksum verification
 ---------------------

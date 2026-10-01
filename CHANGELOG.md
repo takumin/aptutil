@@ -54,6 +54,8 @@ All notable changes to this project will be documented in this file.
   timer of an older one.
 - [mirror] Release files lacking some checksum fields caused requests
   for invalid by-hash paths.
+- [mirror] `Release` and `InRelease` of different generations were mixed
+  in a mirror of a repository supporting by-hash.
 - [mirror] Failures to flush `info.json` were ignored, which could leave
   a truncated index.
 - [mirror] A broken symlink in `dir` stopped removing old mirrors.

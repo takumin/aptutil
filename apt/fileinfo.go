@@ -45,6 +45,21 @@ func (fi *FileInfo) Same(t *FileInfo) bool {
 	return true
 }
 
+// Conflicts returns true if fi and t cannot be the same file, that is,
+// their paths or sizes differ, or a checksum that both have differs.
+// Unlike Same, checksums that only one of them has are not compared.
+func (fi *FileInfo) Conflicts(t *FileInfo) bool {
+	if fi.path != t.path || fi.size != t.size {
+		return true
+	}
+	differ := func(a, b []byte) bool {
+		return a != nil && b != nil && !bytes.Equal(a, b)
+	}
+	return differ(fi.md5sum, t.md5sum) ||
+		differ(fi.sha1sum, t.sha1sum) ||
+		differ(fi.sha256sum, t.sha256sum)
+}
+
 // Path returns the indentifying path string of the file.
 func (fi *FileInfo) Path() string {
 	return fi.path

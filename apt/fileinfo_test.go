@@ -119,6 +119,43 @@ func testFileInfoSame(t *testing.T) {
 	}
 }
 
+func testFileInfoConflicts(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("abc")
+	md5sum := md5.Sum(data)
+	sha256sum := sha256.Sum256(data)
+	sha256sum2 := sha256.Sum256([]byte("xyz"))
+
+	fi := &FileInfo{
+		path:      "/data",
+		size:      uint64(len(data)),
+		md5sum:    md5sum[:],
+		sha256sum: sha256sum[:],
+	}
+
+	testCases := []struct {
+		name string
+		t    *FileInfo
+		want bool
+	}{
+		{"same", fi, false},
+		{"sha256 only", &FileInfo{path: "/data", size: 3, sha256sum: sha256sum[:]}, false},
+		{"no common checksums", &FileInfo{path: "/data", size: 3, sha1sum: []byte("x")}, false},
+		{"path", &FileInfo{path: "/other", size: 3}, true},
+		{"size", &FileInfo{path: "/data", size: 4}, true},
+		{"sha256", &FileInfo{path: "/data", size: 3, sha256sum: sha256sum2[:]}, true},
+	}
+	for _, tc := range testCases {
+		if got := fi.Conflicts(tc.t); got != tc.want {
+			t.Errorf("%s: fi.Conflicts(t) = %v, want %v", tc.name, got, tc.want)
+		}
+		if got := tc.t.Conflicts(fi); got != tc.want {
+			t.Errorf("%s: t.Conflicts(fi) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func testFileInfoJSON(t *testing.T) {
 	t.Parallel()
 
@@ -277,6 +314,7 @@ func testFileInfoCopy(t *testing.T) {
 
 func TestFileInfo(t *testing.T) {
 	t.Run("Same", testFileInfoSame)
+	t.Run("Conflicts", testFileInfoConflicts)
 	t.Run("JSON", testFileInfoJSON)
 	t.Run("JSONMissingChecksums", testFileInfoJSONMissingChecksums)
 	t.Run("AddPrefix", testFileInfoAddPrefix)

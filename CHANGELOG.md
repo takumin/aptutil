@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - [cacher] Error responses no longer include internal error details;
   they are logged instead.
 - [cacher] Keep idle upstream connections up to `max_conns`.
+- [cacher] HEAD requests for items not cached are answered with HEAD
+  requests to upstream servers instead of downloading the items.
 
 ### Fixed
 - [cacher] A downloaded item that failed checksum validation was treated

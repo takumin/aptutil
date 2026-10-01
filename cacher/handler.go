@@ -34,8 +34,44 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	status, f, err := c.Get(r.Context(), p)
+	if r.Method == "HEAD" {
+		c.serveHead(w, r, p)
+		return
+	}
 
+	status, f, err := c.Get(r.Context(), p)
+	if !writeError(w, r, status, err) {
+		return
+	}
+
+	// http.StatusOK
+	defer func() { _ = f.Close() }()
+	var zeroTime time.Time
+	http.ServeContent(w, r, path.Base(p), zeroTime, f)
+}
+
+// serveHead responds to a HEAD request without downloading the item.
+func (c cacheHandler) serveHead(w http.ResponseWriter, r *http.Request, p string) {
+	status, size, err := c.Head(r.Context(), p)
+	if !writeError(w, r, status, err) {
+		return
+	}
+
+	// http.StatusOK
+	ct := mime.TypeByExtension(path.Ext(p))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	if size >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// writeError writes an error response unless status is http.StatusOK
+// and err is nil.  It returns true if nothing is written.
+func writeError(w http.ResponseWriter, r *http.Request, status int, err error) bool {
 	switch {
 	case err != nil:
 		// do not expose internal errors such as file paths to clients.
@@ -45,29 +81,7 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case status != http.StatusOK:
 		http.Error(w, fmt.Sprintf("status %d", status), status)
 	default:
-		// http.StatusOK
-		defer func() { _ = f.Close() }()
-		if r.Method == "GET" {
-			var zeroTime time.Time
-			http.ServeContent(w, r, path.Base(p), zeroTime, f)
-			return
-		}
-		stat, err := f.Stat()
-		if err != nil {
-			log.Error("failed to stat a cached item", map[string]interface{}{
-				"path":  p,
-				"error": err.Error(),
-			})
-			status = http.StatusInternalServerError
-			http.Error(w, http.StatusText(status), status)
-			return
-		}
-		ct := mime.TypeByExtension(path.Ext(p))
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", ct)
-		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
-		w.WriteHeader(http.StatusOK)
+		return true
 	}
+	return false
 }

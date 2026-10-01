@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -14,6 +15,7 @@ type testRepo struct {
 	mu    sync.Mutex
 	files map[string][]byte
 	gets  map[string]int
+	heads atomic.Int64
 }
 
 func newTestRepo() *testRepo {
@@ -37,6 +39,10 @@ func (tr *testRepo) hits(p string) int {
 
 func (tr *testRepo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path[1:]
+	if r.Method == http.MethodHead {
+		tr.heads.Add(1)
+	}
+
 	tr.mu.Lock()
 	if r.Method == http.MethodGet {
 		tr.gets[p]++

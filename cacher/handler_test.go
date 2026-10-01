@@ -66,3 +66,54 @@ func TestCacheHandlerHidesInternalErrors(t *testing.T) {
 		t.Errorf("response body exposes an internal path: %q", body)
 	}
 }
+
+func TestCacheHandlerHead(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	tr.set("pool/a.deb", []byte("aaaa"))
+	tr.set("pool/b.deb", []byte("bb"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	if status, _ := getData(t, c, "ubuntu/pool/a.deb"); status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+
+	cases := []struct {
+		path   string
+		status int
+		length string
+	}{
+		{"/ubuntu/pool/a.deb", http.StatusOK, "4"},
+		{"/ubuntu/pool/b.deb", http.StatusOK, "2"},
+		{"/ubuntu/pool/c.deb", http.StatusNotFound, ""},
+		{"/unknown/pool/a.deb", http.StatusNotFound, ""},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		cacheHandler{c}.ServeHTTP(w, httptest.NewRequest(http.MethodHead, tc.path, nil))
+		if w.Code != tc.status {
+			t.Errorf("HEAD %s: status = %d, want %d", tc.path, w.Code, tc.status)
+			continue
+		}
+		if tc.length != "" && w.Header().Get("Content-Length") != tc.length {
+			t.Errorf("HEAD %s: Content-Length = %q, want %q",
+				tc.path, w.Header().Get("Content-Length"), tc.length)
+		}
+	}
+
+	// cached items are answered locally, and uncached ones are not downloaded.
+	if n := tr.heads.Load(); n != 2 {
+		t.Errorf("upstream HEAD requests = %d, want 2", n)
+	}
+	for _, p := range []string{"pool/b.deb", "pool/c.deb"} {
+		if n := tr.hits(p); n != 0 {
+			t.Errorf("%s was downloaded %d times, want 0", p, n)
+		}
+	}
+	if n := c.items.Len(); n != 1 {
+		t.Errorf("cached items = %d, want 1", n)
+	}
+}

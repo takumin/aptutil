@@ -55,6 +55,9 @@ HTTP methods
 go-apt-cacher accepts only GET and HEAD methods.
 For other methods, it returns HTTP 501 Not Implemented response.
 
+For HEAD requests for items not cached, go-apt-cacher sends HEAD
+requests to the upstream servers instead of downloading the items.
+
 Lock order
 ----------
 

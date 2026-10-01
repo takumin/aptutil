@@ -664,6 +664,19 @@ func (c *Cacher) lookup(p string) (dest string, valid *apt.FileInfo, f *os.File,
 	return dest, valid, f, err
 }
 
+// checkPath returns http.StatusNotFound if p is not to be served,
+// or http.StatusOK otherwise.
+func (c *Cacher) checkPath(p string) int {
+	if c.um.URL(p) == nil {
+		return http.StatusNotFound
+	}
+	if apt.IsMeta(p) && !apt.IsSupported(p) {
+		// return 404 for unsupported compression algorithms
+		return http.StatusNotFound
+	}
+	return http.StatusOK
+}
+
 // Get looks up a cached item, and if not found, downloads it
 // from the upstream server.
 //
@@ -675,14 +688,8 @@ func (c *Cacher) lookup(p string) (dest string, valid *apt.FileInfo, f *os.File,
 // If ctx is canceled while waiting for the download, Get returns
 // ctx.Err().  The download itself continues for other callers.
 func (c *Cacher) Get(ctx context.Context, p string) (statusCode int, f *os.File, err error) {
-	u := c.um.URL(p)
-	if u == nil {
-		return http.StatusNotFound, nil, nil
-	}
-
-	if apt.IsMeta(p) && !apt.IsSupported(p) {
-		// return 404 for unsupported compression algorithms
-		return http.StatusNotFound, nil, nil
+	if status := c.checkPath(p); status != http.StatusOK {
+		return status, nil, nil
 	}
 
 RETRY:
@@ -731,4 +738,79 @@ RETRY:
 		return http.StatusInternalServerError, nil, err
 	}
 	return http.StatusOK, f, nil
+}
+
+// Head returns the HTTP status code and the size of the item for p
+// like Get, but does not download the item if it is not cached.
+// Instead, it asks the upstream server with a HEAD request.
+//
+// The returned size is -1 if it is unknown.
+func (c *Cacher) Head(ctx context.Context, p string) (statusCode int, size int64, err error) {
+	if status := c.checkPath(p); status != http.StatusOK {
+		return status, -1, nil
+	}
+
+	_, _, f, err := c.lookup(p)
+	switch {
+	case err != nil:
+		log.Error("lookup failure", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return http.StatusInternalServerError, -1, err
+	case f != nil:
+		defer func() { _ = f.Close() }()
+		stat, err := f.Stat()
+		if err != nil {
+			log.Error("failed to stat a cached item", map[string]interface{}{
+				"path":  p,
+				"error": err.Error(),
+			})
+			return http.StatusInternalServerError, -1, err
+		}
+		return http.StatusOK, stat.Size(), nil
+	}
+
+	c.dlLock.Lock()
+	result, ok := c.results[p]
+	c.dlLock.Unlock()
+	if ok && result.code != http.StatusOK {
+		return result.code, -1, nil
+	}
+
+	u := c.um.URL(p)
+	c.acquireSemaphore(u.Host)
+	defer c.releaseSemaphore(u.Host)
+
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	header := http.Header{}
+	header.Add("Cache-Control", "max-age=0")
+	header.Add("User-Agent", "Debian APT-HTTP/1.3 (aptutil)")
+
+	req := &http.Request{
+		Method:     "HEAD",
+		URL:        u,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     header,
+	}
+	resp, err := c.client.Do(req.WithContext(ctx))
+	if err != nil {
+		log.Warn("HEAD failed", map[string]interface{}{
+			"url":   u.String(),
+			"error": err.Error(),
+		})
+		if ctx.Err() != nil {
+			return http.StatusServiceUnavailable, -1, ctx.Err()
+		}
+		return http.StatusInternalServerError, -1, nil
+	}
+	closeRespBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, -1, nil
+	}
+	return http.StatusOK, resp.ContentLength, nil
 }

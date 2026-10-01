@@ -59,24 +59,27 @@ type Storage struct {
 // dir is the directory for cached items.
 // capacity is the maximum total size (bytes) of items in the cache.
 // If capacity is zero, items will not be evicted.
-// Non-existing directories will be created (insufficient permission result in panic)
-func NewStorage(dir string, capacity uint64) *Storage {
+// Non-existing directories will be created.
+// NewStorage creates a Storage.
+//
+// dir is the directory for cached items.
+// capacity is the maximum total size (bytes) of items in the cache.
+// If capacity is zero, items will not be evicted.
+// Non-existing directories will be created.
+func NewStorage(dir string, capacity uint64) (*Storage, error) {
 	if !filepath.IsAbs(dir) {
-		panic("dir must be an absolute path")
+		return nil, errors.New("dir must be an absolute path")
 	}
 
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err = os.MkdirAll(dir, 0o755)
-		if err != nil {
-			panic("Storage.NewStorage: failed to create " + dir)
-		}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, errors.Wrap(err, "NewStorage")
 	}
 
 	return &Storage{
 		dir:      dir,
 		cache:    make(map[string]*entry),
 		capacity: capacity,
-	}
+	}, nil
 }
 
 // Len implements heap.Interface.

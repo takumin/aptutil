@@ -12,6 +12,16 @@ import (
 	"github.com/cybozu-go/aptutil/apt"
 )
 
+func newTestStorage(t *testing.T, dir string, capacity uint64) *Storage {
+	t.Helper()
+
+	cm, err := NewStorage(dir, capacity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cm
+}
+
 func insert(cm *Storage, data []byte, path string) (*apt.FileInfo, error) {
 	f, err := cm.TempFile()
 	if err != nil {
@@ -39,7 +49,7 @@ func insert(cm *Storage, data []byte, path string) (*apt.FileInfo, error) {
 func testStorageInsertWorksCorrectly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cm := NewStorage(dir, 0)
+	cm := newTestStorage(t, dir, 0)
 
 	fi, err := insert(cm, []byte("a"), "path/to/a")
 	if err != nil {
@@ -59,7 +69,7 @@ func testStorageInsertWorksCorrectly(t *testing.T) {
 func testStorageInsertOverwrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cm := NewStorage(dir, 0)
+	cm := newTestStorage(t, dir, 0)
 
 	_, err := insert(cm, []byte("a"), "path/to/a")
 	if err != nil {
@@ -84,7 +94,7 @@ func testStorageInsertOverwrite(t *testing.T) {
 func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cm := NewStorage(dir, 0)
+	cm := newTestStorage(t, dir, 0)
 
 	cases := []struct{ Title, Path string }{
 		{
@@ -126,7 +136,7 @@ func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 func testStorageInsertPurgesFilesAllowingLRU(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cm := NewStorage(dir, 3)
+	cm := newTestStorage(t, dir, 3)
 
 	fiA, err := insert(cm, []byte("a"), "a")
 	if err != nil {
@@ -194,6 +204,40 @@ func TestStorageInsert(t *testing.T) {
 	t.Run("Storage.Insert should purge files allowing LRU", testStorageInsertPurgesFilesAllowingLRU)
 }
 
+func TestNewStorage(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewStorage("relative", 0); err == nil {
+		t.Error("NewStorage must fail with a relative path")
+	}
+
+	dir := filepath.Join(t.TempDir(), "a", "b")
+	if _, err := NewStorage(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		t.Errorf("NewStorage must create %s", dir)
+	}
+
+	// failures to create the directory must be reported as errors.
+	f := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(f, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewStorage(filepath.Join(f, "sub"), 0); err == nil {
+		t.Error("NewStorage must fail under a regular file")
+	}
+	if os.Geteuid() != 0 {
+		ro := filepath.Join(t.TempDir(), "ro")
+		if err := os.Mkdir(ro, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewStorage(filepath.Join(ro, "sub"), 0); err == nil {
+			t.Error("NewStorage must fail in a read-only directory")
+		}
+	}
+}
+
 func makeFileInfo(path string, data []byte) (*apt.FileInfo, error) {
 	rb := bytes.NewReader(data)
 	wb := new(bytes.Buffer)
@@ -229,7 +273,7 @@ func TestStorageLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cm := NewStorage(dir, 0)
+	cm := newTestStorage(t, dir, 0)
 	err = cm.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +341,7 @@ func TestStorageLookupCalculatesChecksums(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cm := NewStorage(dir, 0)
+	cm := newTestStorage(t, dir, 0)
 	if err := cm.Load(); err != nil {
 		t.Fatal(err)
 	}

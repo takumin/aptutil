@@ -89,8 +89,14 @@ func NewCacher(config *Config) (*Cacher, error) {
 	}
 	capacity := uint64(config.CacheCapacity) * gib
 
-	meta := NewStorage(metaDir, 0)
-	cache := NewStorage(cacheDir, capacity)
+	meta, err := NewStorage(metaDir, 0)
+	if err != nil {
+		return nil, errors.Wrap(err, "meta_dir")
+	}
+	cache, err := NewStorage(cacheDir, capacity)
+	if err != nil {
+		return nil, errors.Wrap(err, "cache_dir")
+	}
 
 	if err := meta.Load(); err != nil {
 		return nil, errors.Wrap(err, "meta.Load")

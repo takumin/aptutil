@@ -52,9 +52,10 @@ compression format.
 To make the mirror consistent, the update also fails if:
 
 - neither `InRelease` nor `Release` with `Release.gpg` is found, unless
-  `allow_unsigned` is set for the mirror, or
+  `allow_unsigned` is set for the mirror,
 - `Release` and `InRelease` list different indices, which happens when
-  they are downloaded while the upstream server is being updated.
+  they are downloaded while the upstream server is being updated, or
+- indices of different suites list different files at the same path.
 
 Signatures are not verified, so `Release.gpg` downloaded while the
 upstream server is being updated may not match `Release`.

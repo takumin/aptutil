@@ -58,6 +58,8 @@ All notable changes to this project will be documented in this file.
   `Sources` index when none of its compression formats was available.
 - [mirror] `Release` and `InRelease` of different generations were mixed
   in a mirror of a repository supporting by-hash.
+- [mirror] When indices of different suites listed different files at
+  the same path, only one of them was mirrored without errors.
 - [mirror] Failures to flush `info.json` were ignored, which could leave
   a truncated index.
 - [mirror] A broken symlink in `dir` stopped removing old mirrors.

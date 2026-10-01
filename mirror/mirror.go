@@ -191,6 +191,14 @@ func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[str
 				// already included in Release/InRelease
 				continue
 			}
+			// a path can be stored only once; indices of another
+			// suite must not list a different file for it.
+			if existing, ok := itemMap[fipath]; ok {
+				if existing.Conflicts(fi) {
+					return errors.New("inconsistent checksum for " + fipath + " in " + p)
+				}
+				continue
+			}
 			itemMap[fipath] = fi
 		}
 	}

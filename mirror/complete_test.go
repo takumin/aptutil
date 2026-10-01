@@ -233,3 +233,48 @@ func TestMirrorMissingIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestMirrorConflictingItems(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		a, b    string
+		wantErr bool
+	}{
+		{name: "same", a: "x", b: "x"},
+		{name: "different", a: "x", b: "y", wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// flat suites a/ and b/ list x.deb at the same path.
+			// serve the one that the last suite lists.
+			files := map[string]string{"x.deb": tc.b}
+			for suite, data := range map[string]string{"a/": tc.a, "b/": tc.b} {
+				for p, s := range flatRepo(map[string]string{"x.deb": data}) {
+					files[suite+p] = s
+				}
+			}
+
+			dir, err := updateOnce(t, files, []string{"a/", "b/"}, false)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("update must fail")
+				}
+				if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+					t.Errorf("mirror must not be published: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "x.deb")); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -312,6 +313,43 @@ func testFileInfoCopy(t *testing.T) {
 	}
 }
 
+func testFileInfoCopyLarge(t *testing.T) {
+	t.Parallel()
+
+	// larger than the buffer of io.Copy to be written in chunks.
+	data := make([]byte, 1<<20+1)
+	for i := range data {
+		data[i] = byte(i * 7)
+	}
+	md5sum := md5.Sum(data)
+	sha1sum := sha1.Sum(data)
+	sha256sum := sha256.Sum256(data)
+
+	w := new(bytes.Buffer)
+	fi, err := CopyWithFileInfo(w, bytes.NewReader(data), "/large")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(w.Bytes(), data) {
+		t.Error("Copy did not work properly")
+	}
+	if !bytes.Equal(fi.md5sum, md5sum[:]) ||
+		!bytes.Equal(fi.sha1sum, sha1sum[:]) ||
+		!bytes.Equal(fi.sha256sum, sha256sum[:]) {
+		t.Error("Generated FileInfo is invalid")
+	}
+}
+
+func BenchmarkCopyWithFileInfo(b *testing.B) {
+	data := make([]byte, 8<<20)
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		if _, err := CopyWithFileInfo(io.Discard, bytes.NewReader(data), "/bench"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestFileInfo(t *testing.T) {
 	t.Run("Same", testFileInfoSame)
 	t.Run("Conflicts", testFileInfoConflicts)
@@ -320,4 +358,5 @@ func TestFileInfo(t *testing.T) {
 	t.Run("AddPrefix", testFileInfoAddPrefix)
 	t.Run("Checksum", testFileInfoChecksum)
 	t.Run("Copy", testFileInfoCopy)
+	t.Run("CopyLarge", testFileInfoCopyLarge)
 }

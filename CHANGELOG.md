@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Require Go 1.26 or later, and update dependencies.
+- Calculate MD5, SHA1, and SHA256 checksums of downloaded files
+  concurrently, which almost doubles the throughput of calculating them.
 - [mirror] `max_conns = 0` now means no limit as documented; negative
   `max_conns` is rejected by both commands instead of panicking.
 - [cacher] Error responses no longer include internal error details;

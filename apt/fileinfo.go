@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash"
 	"io"
 	"path"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -190,6 +192,21 @@ func decodeChecksum(s string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
 
+// parallelHashWriter writes each chunk to hashes concurrently, so that
+// calculating them takes as long as the slowest one, MD5, instead of
+// the sum of them.
+type parallelHashWriter []hash.Hash
+
+func (w parallelHashWriter) Write(p []byte) (int, error) {
+	var wg sync.WaitGroup
+	for _, h := range w[1:] {
+		wg.Go(func() { _, _ = h.Write(p) })
+	}
+	_, _ = w[0].Write(p)
+	wg.Wait()
+	return len(p), nil
+}
+
 // CopyWithFileInfo copies from src to dst until either EOF is reached
 // on src or an error occurs, and returns FileInfo calculated while copying.
 func CopyWithFileInfo(dst io.Writer, src io.Reader, p string) (*FileInfo, error) {
@@ -197,7 +214,7 @@ func CopyWithFileInfo(dst io.Writer, src io.Reader, p string) (*FileInfo, error)
 	sha1hash := sha1.New()
 	sha256hash := sha256.New()
 
-	w := io.MultiWriter(md5hash, sha1hash, sha256hash, dst)
+	w := io.MultiWriter(parallelHashWriter{md5hash, sha1hash, sha256hash}, dst)
 	n, err := io.Copy(w, src)
 	if err != nil {
 		return nil, err

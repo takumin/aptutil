@@ -555,7 +555,16 @@ func addFileInfoToList(fi *apt.FileInfo, m map[string][]*apt.FileInfo, byhash bo
 	return nil
 }
 
-func (m *Mirror) handleReleaseResults(results <-chan *dlResult, byhash *bool) ([]*apt.FileInfo, error) {
+// releaseFile is a Release, Release.gpg, or InRelease file downloaded.
+type releaseFile struct {
+	path string
+	fil  []*apt.FileInfo
+	d    apt.Paragraph
+}
+
+// handleReleaseResults handles a result of downloading a release file.
+// It returns nil if the file is not found.
+func (m *Mirror) handleReleaseResults(results <-chan *dlResult) (*releaseFile, error) {
 	r := <-results
 	if r.tempfile != nil {
 		defer closeAndRemoveFile(r.tempfile)
@@ -584,11 +593,7 @@ func (m *Mirror) handleReleaseResults(results <-chan *dlResult, byhash *bool) ([
 		return nil, errors.Wrap(err, "ExtractFileInfo: "+r.path)
 	}
 
-	if *byhash && path.Base(r.path) != "Release.gpg" {
-		*byhash = apt.SupportByHash(d)
-	}
-
-	return fil, nil
+	return &releaseFile{path: r.path, fil: fil, d: d}, nil
 }
 
 func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string][]*apt.FileInfo, bool, error) {
@@ -606,11 +611,18 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	byhash := true
 	filMap := make(map[string][]*apt.FileInfo)
 	for i := 0; i < len(releases); i++ {
-		fil, err := m.handleReleaseResults(results, &byhash)
+		rf, err := m.handleReleaseResults(results)
 		if err != nil {
 			return nil, byhash, err
 		}
-		for _, fi := range fil {
+		if rf == nil {
+			continue
+		}
+
+		if byhash && path.Base(rf.path) != "Release.gpg" {
+			byhash = apt.SupportByHash(rf.d)
+		}
+		for _, fi := range rf.fil {
 			err = addFileInfoToList(fi, filMap, byhash)
 			if err != nil {
 				return nil, byhash, err

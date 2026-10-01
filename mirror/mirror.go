@@ -294,11 +294,15 @@ func (m *Mirror) download(ctx context.Context,
 	p string, fi *apt.FileInfo, byhash bool, ch chan<- *dlResult,
 ) {
 	var tempfile *os.File
+	var resp *http.Response
 	r := &dlResult{
 		path: p,
 	}
 
 	defer func() {
+		if resp != nil {
+			closeRespBody(resp)
+		}
 		r.tempfile = tempfile
 		ch <- r
 		m.semaphore <- struct{}{}
@@ -316,6 +320,11 @@ RETRY:
 	if tempfile != nil {
 		closeAndRemoveFile(tempfile)
 		tempfile = nil
+	}
+	// close the previous response so that its connection can be reused.
+	if resp != nil {
+		closeRespBody(resp)
+		resp = nil
 	}
 
 	// allow interrupts
@@ -358,7 +367,6 @@ RETRY:
 		r.err = err
 		return
 	}
-	defer closeRespBody(resp)
 
 	if log.Enabled(log.LvDebug) {
 		log.Debug("downloaded", map[string]interface{}{

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/cybozu-go/aptutil/apt"
@@ -283,5 +284,58 @@ func TestStorageLoad(t *testing.T) {
 	}
 	if !bytes.Equal(files["ghij"], data) {
 		t.Error(`!bytes.Equal(files["ghij"], data)`)
+	}
+}
+
+func TestStorageLookupCalculatesChecksums(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := bytes.Repeat([]byte("data"), 1<<16)
+	err := os.WriteFile(filepath.Join(dir, "a"+fileSuffix), data, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cm := NewStorage(dir, 0)
+	if err := cm.Load(); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, err := makeFileInfo("a", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, err := makeFileInfo("a", bytes.Repeat([]byte("atad"), 1<<16))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// look up concurrently while checksums are not calculated yet.
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			f, err := cm.Lookup(fi)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = f.Close()
+		})
+		wg.Go(func() {
+			if _, err := cm.Lookup(bad); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Lookup(bad) = %v, want ErrNotFound", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if !cm.cache["a"].HasChecksum() {
+		t.Error("checksums should be calculated")
+	}
+	if cm.used != uint64(len(data)) {
+		t.Errorf("used = %d, want %d", cm.used, len(data))
 	}
 }

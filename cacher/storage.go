@@ -134,16 +134,6 @@ func (cm *Storage) maint() {
 	}
 }
 
-func readData(path string) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // G304: path is built from the cache directory and a validated item path
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	return io.ReadAll(f)
-}
-
 // Load loads existing items in filesystem.
 func (cm *Storage) Load() error {
 	cm.mu.Lock()
@@ -273,17 +263,16 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	return nil
 }
 
-func calcChecksum(dir string, e *entry) error {
-	if e.HasChecksum() {
-		return nil
-	}
-
-	data, err := readData(filepath.Join(dir, e.FilePath()))
+// calcChecksum streams the file at filename to calculate checksums of
+// the item at p.
+func calcChecksum(filename, p string) (*apt.FileInfo, error) {
+	f, err := os.Open(filename) //nolint:gosec // G304: filename is built from the cache directory and a validated item path
 	if err != nil {
-		return err
+		return nil, err
 	}
-	e.CalcChecksums(data)
-	return nil
+	defer func() { _ = f.Close() }()
+
+	return apt.CopyWithFileInfo(io.Discard, f, p)
 }
 
 // Lookup looks up an item in the cache.
@@ -291,20 +280,42 @@ func calcChecksum(dir string, e *entry) error {
 //
 // The caller is responsible to close the returned os.File.
 func (cm *Storage) Lookup(fi *apt.FileInfo) (*os.File, error) {
+	p := fi.Path()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	e, ok := cm.cache[fi.Path()]
-	if !ok {
-		return nil, ErrNotFound
-	}
+	for {
+		e, ok := cm.cache[p]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		if e.HasChecksum() {
+			return cm.open(fi, e)
+		}
 
-	// delayed checksum calculation
-	err := calcChecksum(cm.dir, e)
-	if err != nil {
-		return nil, err
-	}
+		// Items loaded by Load have no checksums yet.  Calculate them
+		// without holding cm.mu as it takes a while for large files.
+		filename := filepath.Join(cm.dir, e.FilePath())
+		cm.mu.Unlock()
+		fi2, err := calcChecksum(filename, p)
+		cm.mu.Lock()
+		if err != nil {
+			return nil, err
+		}
 
+		// The item may have been replaced or removed meanwhile.
+		// If so, look it up again.
+		if cm.cache[p] == e && !e.HasChecksum() {
+			cm.used = cm.used - e.Size() + fi2.Size()
+			e.FileInfo = fi2
+		}
+	}
+}
+
+// open opens the file of e if it matches fi.
+// cm.mu lock must be acquired beforehand.
+func (cm *Storage) open(fi *apt.FileInfo, e *entry) (*os.File, error) {
 	if !fi.Same(e.FileInfo) {
 		// checksum mismatch
 		return nil, ErrNotFound

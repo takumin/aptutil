@@ -447,10 +447,10 @@ RETRY:
 
 	if ok {
 		f, err := storage.Lookup(fi)
-		switch err {
-		case nil:
+		switch {
+		case err == nil:
 			return http.StatusOK, f, nil
-		case ErrNotFound:
+		case errors.Is(err, ErrNotFound):
 		default:
 			log.Error("lookup failure", map[string]interface{}{
 				"error": err.Error(),

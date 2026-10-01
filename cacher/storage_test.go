@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -114,7 +115,7 @@ func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.Title, func(t *testing.T) {
 			_, err := insert(cm, []byte("a"), tc.Path)
-			if err != ErrBadPath {
+			if !errors.Is(err, ErrBadPath) {
 				t.Fatal(err)
 			}
 		})
@@ -146,11 +147,11 @@ func testStorageInsertPurgesFilesAllowingLRU(t *testing.T) {
 		t.Error(`cmd.Len() != 1`)
 	}
 	_, err = cm.Lookup(fiA)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Error(`err != ErrNotFound`)
 	}
 	_, err = cm.Lookup(fiBC)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Error(`err != ErrNotFound`)
 	}
 
@@ -172,7 +173,7 @@ func testStorageInsertPurgesFilesAllowingLRU(t *testing.T) {
 	}
 
 	_, err = cm.Lookup(fiA)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Error(`err != ErrNotFound`)
 	}
 	_, err = cm.Lookup(fiDE)

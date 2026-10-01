@@ -1,6 +1,7 @@
 package apt
 
 import (
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -74,7 +75,7 @@ func TestParserRelease(t *testing.T) {
 	}
 
 	_, err = p.Read()
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Error(`err != io.EOF`)
 	}
 }
@@ -113,7 +114,7 @@ func TestParserInRelease(t *testing.T) {
 	}
 
 	_, err = p.Read()
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Error(`err != io.EOF`)
 	}
 }
@@ -174,7 +175,7 @@ func TestParserPackages(t *testing.T) {
 	}
 
 	_, err = p.Read()
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Error(`err != io.EOF`)
 	}
 }

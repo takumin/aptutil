@@ -1,6 +1,7 @@
 package cacher
 
 import (
+	"errors"
 	"net/url"
 	"testing"
 )
@@ -12,12 +13,12 @@ func TestURLMap(t *testing.T) {
 	u, _ := url.Parse("http://archive.ubuntu.com/ubuntu")
 
 	err := um.Register("", u)
-	if err != ErrInvalidPrefix {
+	if !errors.Is(err, ErrInvalidPrefix) {
 		t.Error(`empty prefix must be invalid`)
 	}
 
 	err = um.Register("hoge/fuga", u)
-	if err != ErrInvalidPrefix {
+	if !errors.Is(err, ErrInvalidPrefix) {
 		t.Error(`hoge/fuga must be an invalid prefix`)
 	}
 

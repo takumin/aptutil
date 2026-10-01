@@ -274,7 +274,7 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 }
 
 func calcChecksum(dir string, e *entry) error {
-	if e.FileInfo.HasChecksum() {
+	if e.HasChecksum() {
 		return nil
 	}
 
@@ -282,7 +282,7 @@ func calcChecksum(dir string, e *entry) error {
 	if err != nil {
 		return err
 	}
-	e.FileInfo.CalcChecksums(data)
+	e.CalcChecksums(data)
 	return nil
 }
 

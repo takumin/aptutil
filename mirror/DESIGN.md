@@ -31,6 +31,22 @@ where MIRROR and MIRROR2 are identifiers for each mirror defined
 in the configuration file.  DATETIME is the timestamp when go-apt-mirror
 starts mirroring.
 
+Failures
+--------
+
+Mirrors are updated independently.  If go-apt-mirror fails to update
+a mirror, the symlink of the mirror is left unchanged, and the other
+mirrors are still updated.  go-apt-mirror exits with an error if any
+mirror failed.
+
+A mirror is published only when all of its files are mirrored, so that
+published mirrors are always complete and consistent with signed
+`Release` files.  If any pool file such as a deb file fails to
+download, the update of the mirror fails, and the previous mirror stays
+published.  Indices listed in `Release` but not found in the upstream
+server are tolerated, as `Release` usually lists indices in compression
+formats that are not served.
+
 Checksum verification
 ---------------------
 

@@ -16,6 +16,11 @@ All notable changes to this project will be documented in this file.
 - [cacher] Keep idle upstream connections up to `max_conns`.
 - [cacher] HEAD requests for items not cached are answered with HEAD
   requests to upstream servers instead of downloading the items.
+- [mirror] A failure to update a mirror no longer stops updating the
+  other mirrors; the failed mirror keeps the previous one published.
+  go-apt-mirror still exits with an error listing the failed mirrors.
+- [mirror] Local errors such as a full disk while downloading are no
+  longer retried.
 
 ### Fixed
 - [cacher] A downloaded item that failed checksum validation was treated

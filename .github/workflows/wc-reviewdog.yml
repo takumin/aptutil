@@ -1,0 +1,85 @@
+---
+name: Reviewdog
+on:
+  workflow_call:
+permissions: {}
+concurrency:
+  group: reviewdog-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+jobs:
+  matrix:
+    name: Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.matrix.outputs.result }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Setup aqua
+      uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+      with:
+        aqua_version: v2.63.0
+    - name: Generate Matrix
+      id: matrix
+      shell: bash
+      run: echo "result=$(task reviewdog:matrix)" >> "$GITHUB_OUTPUT"
+    - name: Check Matrix
+      env:
+        REVIEWDOG_MATRIX: ${{ steps.matrix.outputs.result }}
+      run: |-
+        echo "${REVIEWDOG_MATRIX}" | jq
+  reviewdog:
+    needs: matrix
+    name: Reviewdog (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.targets) }}
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Setup aqua
+      uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+      with:
+        aqua_version: v2.63.0
+        aqua_opts: -t reviewdog,${{ matrix.name }}
+    - name: Restore go mod cache
+      if: matrix.name == 'govet'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: go-mod-${{ hashFiles('**/go.sum') }}
+        restore-keys: |-
+          go-mod-
+        path: ~/go/pkg/mod/
+    - name: Restore go build cache
+      if: matrix.name == 'govet'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: go-build-test-${{ hashFiles('.aqua/pkgs/go.yaml', '**/go.sum') }}
+        restore-keys: |-
+          go-build-test-
+        path: ~/.cache/go-build/
+    - name: Running reviewdog
+      run: task "${REVIEWDOG_TARGET}"
+      env:
+        REVIEWDOG_TARGET: ${{ matrix.target }}
+        REVIEWDOG_REPORTER: >-
+          ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'local'
+          || (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && 'github-pr-review'
+          || github.event_name == 'push' && 'github-check'
+          || 'local' }}
+        REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REVIEWDOG_ARGS: -log-level 'debug' -tee

@@ -1,0 +1,59 @@
+---
+name: Fetch
+on:
+  workflow_call:
+permissions: {}
+concurrency:
+  group: fetch-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+jobs:
+  fetch:
+    name: Fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        sparse-checkout: |-
+          .aqua
+          tasks
+          go.mod
+          go.sum
+    - name: Setup aqua
+      uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+      with:
+        aqua_version: v2.63.0
+    - name: Restore go mod cache
+      id: go-mod-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: go-mod-${{ hashFiles('**/go.sum') }}
+        path: ~/go/pkg/mod/
+    - name: Restore setup build aqua cache
+      id: setup-build-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: setup-build-aqua-${{ hashFiles('.aqua/**/*.yaml', '.aqua/**/*.yml') }}
+        path: ~/.local/share/aquaproj-aqua/
+    - name: Fetch go modules
+      run: |-
+        task tool:go:mod:download
+    - name: Fetch setup build aqua
+      run: |-
+        task setup:build:aqua
+    - name: Save setup build aqua cache
+      if: github.ref == 'refs/heads/master' && steps.setup-build-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: ${{ steps.setup-build-cache.outputs.cache-primary-key }}
+        path: ~/.local/share/aquaproj-aqua/
+    - name: Save go mod cache
+      if: github.ref == 'refs/heads/master' && steps.go-mod-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: ${{ steps.go-mod-cache.outputs.cache-primary-key }}
+        path: ~/go/pkg/mod/

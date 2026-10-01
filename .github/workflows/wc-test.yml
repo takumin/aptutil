@@ -1,0 +1,51 @@
+---
+name: Test
+on:
+  workflow_call:
+permissions: {}
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Setup aqua
+      uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
+      with:
+        aqua_version: v2.63.0
+    - name: Restore go mod cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: go-mod-${{ hashFiles('**/go.sum') }}
+        restore-keys: |-
+          go-mod-
+        path: ~/go/pkg/mod/
+    - name: Restore go build cache
+      id: go-build-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: go-build-test-${{ hashFiles('.aqua/pkgs/go.yaml', '**/go.sum') }}
+        restore-keys: |-
+          go-build-test-
+        path: ~/.cache/go-build/
+    - name: Setup test
+      run: |-
+        task setup:test
+    - name: Test
+      run: |-
+        task test
+    - name: Save go build cache
+      if: github.ref == 'refs/heads/master' && steps.go-build-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: ${{ steps.go-build-cache.outputs.cache-primary-key }}
+        path: ~/.cache/go-build/

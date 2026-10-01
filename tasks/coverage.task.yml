@@ -1,0 +1,31 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+includes:
+  setup:
+    taskfile: setup.task.yml
+    internal: true
+
+tasks:
+  default:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - task: coverage
+
+  # Not part of the default `task all` pipeline: it re-runs the whole test
+  # suite with coverage instrumentation, so it is opt-in locally and runs as its
+  # own informational CI job (.github/workflows/wc-coverage.yml).
+  coverage:
+    desc: '{{.TASK}}'
+    label: coverage:all
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: setup:coverage
+    cmds:
+    - mkdir -p coverage
+    - go test -race -covermode atomic -coverprofile coverage/coverage.out ./...
+    - go tool cover -func coverage/coverage.out

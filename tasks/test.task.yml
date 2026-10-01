@@ -1,0 +1,40 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+includes:
+  setup:
+    taskfile: setup.task.yml
+    internal: true
+
+tasks:
+  default:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - task: test
+
+  test:
+    desc: '{{.TASK}}'
+    label: test:all
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: setup:test
+    sources:
+    - 'go.mod'
+    - 'go.sum'
+    - '**/*.go'
+    - '**/testdata/**/*'
+    # Fingerprint the task's own definition and the pinned toolchain so editing
+    # this task's commands or bumping Go re-runs it locally instead of being
+    # skipped on a stale .task/.done_* marker.
+    - 'tasks/test.task.yml'
+    - '.aqua/pkgs/go.yaml'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - go test -race ./...
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true

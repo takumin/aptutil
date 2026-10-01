@@ -1,0 +1,90 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+includes:
+  tool:
+    taskfile: tool.task.yml
+    internal: true
+
+tasks:
+  default:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - task: yamlfmt
+    - task: pinact
+    - task: gomod
+    - task: gofmt
+
+  yamlfmt:
+    desc: '{{.TASK}}'
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: tool:aqua:tag:yamlfmt
+    sources:
+    - '.*.yml'
+    - '.*.yaml'
+    - '**/*.yml'
+    - '**/*.yaml'
+    - '.*/**/*.yml'
+    - '.*/**/*.yaml'
+    - exclude: '.git/**/*'
+    - exclude: '.task/**/*'
+    - exclude: 'dist/**/*'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - yamlfmt .
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true
+
+  pinact:
+    desc: '{{.TASK}}'
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: tool:aqua:tag:pinact
+    sources:
+    - '.github/**/*.yml'
+    - '.github/**/*.yaml'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - pinact run
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true
+
+  gomod:
+    desc: '{{.TASK}}'
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: tool:go:mod:download
+    sources:
+    - 'go.mod'
+    - 'go.sum'
+    - '**/*.go'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - go mod tidy
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true
+
+  gofmt:
+    desc: '{{.TASK}}'
+    dir: '{{.ROOT_DIR}}'
+    deps:
+    - task: tool:aqua:tag:go
+    sources:
+    - '**/*.go'
+    - exclude: '.git/**/*'
+    - exclude: '.task/**/*'
+    - exclude: 'dist/**/*'
+    generates:
+    - .task/.done_{{.TASK}}
+    cmds:
+    - gofmt -s -w .
+    - cmd: touch .task/.done_{{.TASK}}
+      silent: true

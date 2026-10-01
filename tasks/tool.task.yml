@@ -1,0 +1,62 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+tasks:
+  default:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - task: aqua:all
+
+  aqua:
+    internal: true
+    label: aqua:install:{{.TAG}}
+    dir: '{{.ROOT_DIR}}'
+    sources:
+    - .aqua/*.yml
+    - .aqua/*.yaml
+    - .aqua/**/*.yml
+    - .aqua/**/*.yaml
+    generates:
+    - .task/.done_aqua:install:{{.TAG}}
+    cmds:
+    - aqua install {{.ARGS}}
+    - cmd: touch .task/.done_aqua:install:{{.TAG}}
+      silent: true
+
+  aqua:all:
+    desc: '{{.TASK}}'
+    cmds:
+    - task: aqua
+      vars:
+        TAG: all
+        ARGS: -a
+
+  aqua:tag:*:
+    desc: '{{.TASK}}'
+    cmds:
+    - task: aqua
+      vars:
+        TAG: '{{index .MATCH 0}}'
+        ARGS: -t {{index .MATCH 0}}
+
+  go:mod:download:
+    desc: '{{.TASK}}'
+    label: go:mod:download
+    dir: '{{.ROOT_DIR}}'
+    run: once
+    deps:
+    - task: aqua:tag:go
+    sources:
+    - 'go.mod'
+    - 'go.sum'
+    generates:
+    - .task/.done_go:mod:download
+    cmds:
+    - go mod download
+    - go mod verify
+    - cmd: touch .task/.done_go:mod:download
+      silent: true

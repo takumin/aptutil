@@ -1,0 +1,29 @@
+---
+runner:
+  editorconfig-checker:
+    cmd: editorconfig-checker -no-color -format default
+    errorformat:
+    - '%-G%+P%f:'
+    - '%\s%+%l: %m'
+    - '%-Q'
+    - '%-G%.%#'
+  actionlint:
+    cmd: actionlint -shellcheck shellcheck -oneline -no-color
+    errorformat:
+    - '%f:%l:%c: %m'
+  ghalint-run:
+    cmd: ghalint --log-color never run
+    errorformat:
+    - '%.%#error="%m" job_name=%.%#workflow_file_path=%f'
+    - '%-G%.%#'
+  ghalint-act:
+    cmd: ghalint --log-color never act
+    errorformat:
+    - '%.%#action_file_path=%f error="%m" policy_name=%.%#'
+    - '%-G%.%#'
+  zizmor:
+    cmd: zizmor --quiet --no-progress --format=sarif .
+    format: sarif
+  govet:
+    cmd: go vet ./...
+    format: govet

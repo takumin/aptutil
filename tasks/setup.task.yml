@@ -1,0 +1,40 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+includes:
+  tool:
+    taskfile: tool.task.yml
+    internal: true
+
+tasks:
+  test:
+    desc: '{{.TASK}}'
+    silent: true
+    deps:
+    - task: tool:aqua:tag:go
+    - task: tool:go:mod:download
+
+  coverage:
+    desc: '{{.TASK}}'
+    silent: true
+    deps:
+    - task: tool:aqua:tag:go
+    - task: tool:go:mod:download
+
+  build:
+    desc: '{{.TASK}}'
+    silent: true
+    deps:
+    - task: build:aqua
+    - task: tool:go:mod:download
+
+  build:aqua:
+    desc: '{{.TASK}}'
+    silent: true
+    deps:
+    - task: tool:aqua:tag:go
+    - task: tool:aqua:tag:coreutils
+    - task: tool:aqua:tag:cosign

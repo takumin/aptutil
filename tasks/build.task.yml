@@ -1,0 +1,107 @@
+---
+# https://taskfile.dev
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+vars:
+  GOOS: '{{env "BUILD_GOOS" | default OS}}'
+  GOARCH: '{{env "BUILD_GOARCH" | default ARCH}}'
+  COMMANDS:
+  - go-apt-cacher
+  - go-apt-mirror
+  MATRIX_TARGETS:
+  - linux/amd64
+  - linux/arm64
+  BUILDFLAGS: -trimpath -ldflags '-s -w -buildid='
+
+includes:
+  setup:
+    taskfile: setup.task.yml
+    internal: true
+
+tasks:
+  default:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - task: build
+    - task: sha256sum
+
+  matrix:
+    desc: '{{.TASK}}'
+    silent: true
+    cmds:
+    - echo '{{.MATRIX_TARGETS | toJson}}' | jq -cM -f scripts/build-matrix.jq
+
+  build:
+    desc: '{{.TASK}}'
+    dir: '{{.ROOT_DIR}}'
+    label: build:{{.GOOS}}:{{.GOARCH}}
+    deps:
+    - task: setup:build
+    sources:
+    - 'go.mod'
+    - 'go.sum'
+    - '**/*.go'
+    - exclude: '**/*_test.go'
+    generates:
+    - dist/*-{{.GOOS}}-{{.GOARCH}}
+    env:
+      CGO_ENABLED: '0'
+      GOOS: '{{.GOOS}}'
+      GOARCH: '{{.GOARCH}}'
+    cmds:
+    - mkdir -p dist
+    - for:
+        var: COMMANDS
+      cmd: go build {{.BUILDFLAGS}} -o dist/{{.ITEM}}-{{.GOOS}}-{{.GOARCH}} ./cmd/{{.ITEM}}
+
+  sha256sum:
+    desc: '{{.TASK}}'
+    label: sha256sum:{{.GOOS}}:{{.GOARCH}}
+    dir: '{{.ROOT_DIR}}/dist'
+    deps:
+    - task: setup:build
+    - task: build
+    sources:
+    - '*-{{.GOOS}}-{{.GOARCH}}'
+    - exclude: '*.sha256sum'
+    - exclude: '*.cert'
+    - exclude: '*.sig'
+    generates:
+    - '*-{{.GOOS}}-{{.GOARCH}}.sha256sum'
+    cmds:
+    - for:
+        var: COMMANDS
+      cmd: coreutils sha256sum "{{.ITEM}}-{{.GOOS}}-{{.GOARCH}}" > "{{.ITEM}}-{{.GOOS}}-{{.GOARCH}}.sha256sum"
+
+  sha256sum:verify:
+    desc: '{{.TASK}}'
+    label: sha256sum:verify:{{.GOOS}}:{{.GOARCH}}
+    dir: '{{.ROOT_DIR}}/dist'
+    deps:
+    - task: setup:build
+    - task: sha256sum
+    cmds:
+    - for:
+        var: COMMANDS
+      cmd: coreutils sha256sum -c "{{.ITEM}}-{{.GOOS}}-{{.GOARCH}}.sha256sum"
+
+  cosign:
+    desc: '{{.TASK}}'
+    label: cosign:{{.GOOS}}:{{.GOARCH}}
+    dir: '{{.ROOT_DIR}}/dist'
+    deps:
+    - task: setup:build
+    - task: build
+    cmds:
+    - for:
+        var: COMMANDS
+      cmd: >-
+        cosign sign-blob {{.ITEM}}-{{.GOOS}}-{{.GOARCH}}
+        -y
+        --use-signing-config=false
+        --new-bundle-format=false
+        --output-certificate {{.ITEM}}-{{.GOOS}}-{{.GOARCH}}.cert
+        --output-signature {{.ITEM}}-{{.GOOS}}-{{.GOARCH}}.sig

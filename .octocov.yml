@@ -1,0 +1,24 @@
+---
+# octocov configuration. See https://github.com/k1LoW/octocov
+#
+# Informational only: no `coverage.acceptable` / `codeToTestRatio.acceptable`
+# thresholds are set, so octocov never fails the build.
+coverage:
+  paths:
+  - coverage/coverage.out
+codeToTestRatio:
+  code:
+  - '**/*.go'
+  - '!**/*_test.go'
+  test:
+  - '**/*_test.go'
+comment:
+  if: is_pull_request
+  updatePrevious: true
+report:
+  if: is_default_branch
+  datastores:
+  - artifact://${GITHUB_REPOSITORY}
+diff:
+  datastores:
+  - artifact://${GITHUB_REPOSITORY}

@@ -17,3 +17,10 @@ tags
 # Archives
 pkg/
 *.tgz
+
+# Task / build outputs
+/.task/
+/dist/
+/coverage/
+**/.claude/worktrees
+**/.claude/settings.local.json

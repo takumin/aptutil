@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
+	"github.com/cybozu-go/aptutil/internal/stall"
 	"github.com/cybozu-go/log"
 	"github.com/cybozu-go/well"
 	"github.com/pkg/errors"
@@ -27,10 +28,6 @@ const (
 	// is aborted and retried.
 	stallTimeout = 1 * time.Minute
 )
-
-// errStalled is returned when a download makes no progress for
-// stallTimeout.
-var errStalled = errors.New("download stalled")
 
 var validID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
@@ -328,64 +325,6 @@ func closeRespBody(r *http.Response) {
 	_ = r.Body.Close()
 }
 
-// stallWatcher cancels a request when it makes no progress for a while.
-//
-// Without it, a download from an upstream that keeps the connection
-// open but stops sending data would hang forever while holding the
-// lock file.
-type stallWatcher struct {
-	timer   *time.Timer
-	timeout time.Duration
-	cancel  context.CancelCauseFunc
-}
-
-// watchStall returns a context for a request derived from ctx, and
-// a stallWatcher that cancels it after timeout without progress.
-func watchStall(ctx context.Context, timeout time.Duration) (context.Context, *stallWatcher) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	w := &stallWatcher{
-		timeout: timeout,
-		cancel:  cancel,
-	}
-	w.timer = time.AfterFunc(timeout, func() { cancel(errStalled) })
-	return ctx, w
-}
-
-// wrap returns a ReadCloser that postpones the timeout whenever data
-// is read from rc.
-func (w *stallWatcher) wrap(rc io.ReadCloser) io.ReadCloser {
-	return &stallReader{ReadCloser: rc, w: w}
-}
-
-// stop releases the resources of w.  It must be called after the
-// response body is closed so that the connection can be reused.
-func (w *stallWatcher) stop() {
-	w.timer.Stop()
-	w.cancel(nil)
-}
-
-type stallReader struct {
-	io.ReadCloser
-	w *stallWatcher
-}
-
-func (r *stallReader) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p)
-	if n > 0 {
-		r.w.timer.Reset(r.w.timeout)
-	}
-	return n, err
-}
-
-// stallError returns errStalled if ctx was canceled by a stallWatcher,
-// or err otherwise.
-func stallError(ctx context.Context, err error) error {
-	if errors.Is(context.Cause(ctx), errStalled) {
-		return errStalled
-	}
-	return err
-}
-
 func closeAndRemoveFile(f *os.File) {
 	_ = f.Close()
 	_ = os.Remove(f.Name())
@@ -397,7 +336,7 @@ func (m *Mirror) download(ctx context.Context,
 ) {
 	var tempfile *os.File
 	var resp *http.Response
-	var watcher *stallWatcher
+	var watcher *stall.Watcher
 	r := &dlResult{
 		path: p,
 	}
@@ -407,7 +346,7 @@ func (m *Mirror) download(ctx context.Context,
 			closeRespBody(resp)
 		}
 		if watcher != nil {
-			watcher.stop()
+			watcher.Stop()
 		}
 		r.tempfile = tempfile
 		ch <- r
@@ -431,7 +370,7 @@ RETRY:
 		resp = nil
 	}
 	if watcher != nil {
-		watcher.stop()
+		watcher.Stop()
 		watcher = nil
 	}
 
@@ -471,10 +410,10 @@ RETRY:
 		ProtoMinor: 1,
 		Header:     header,
 	}
-	reqCtx, watcher := watchStall(ctx, m.stallTimeout)
+	reqCtx, watcher := stall.Watch(ctx, m.stallTimeout)
 	resp, err := m.client.Do(req.WithContext(reqCtx))
 	if err != nil {
-		err = stallError(reqCtx, err)
+		err = stall.Error(reqCtx, err)
 		log.Warn("GET failed", map[string]interface{}{
 			"repo":  m.id,
 			"path":  p,
@@ -496,7 +435,7 @@ RETRY:
 		})
 	}
 
-	resp.Body = watcher.wrap(resp.Body)
+	resp.Body = watcher.Wrap(resp.Body)
 	r.status = resp.StatusCode
 	if r.status >= 500 && retries < httpRetries {
 		retries++
@@ -514,7 +453,7 @@ RETRY:
 	}
 	fi2, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)
 	if err != nil {
-		err = stallError(reqCtx, err)
+		err = stall.Error(reqCtx, err)
 		log.Warn("GET failed", map[string]interface{}{
 			"repo":  m.id,
 			"path":  p,

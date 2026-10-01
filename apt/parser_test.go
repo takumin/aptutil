@@ -13,7 +13,7 @@ func TestParserRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	p := NewParser(f)
 	d, err := p.Read()
@@ -86,7 +86,7 @@ func TestParserInRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	p := NewParser(f)
 	d, err := p.Read()
@@ -125,7 +125,7 @@ func TestParserPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	p := NewParser(f)
 	d, err := p.Read()

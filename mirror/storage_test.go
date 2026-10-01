@@ -30,7 +30,7 @@ func testStorageBadConstruction(t *testing.T) {
 		if _, err := os.Stat(f); err != nil {
 			return
 		}
-		os.Remove(f)
+		_ = os.Remove(f)
 	}(f.Name())
 
 	_, err = NewStorage(f.Name(), "pre")
@@ -38,7 +38,7 @@ func testStorageBadConstruction(t *testing.T) {
 		t.Error("NewStorage must fail with regular file")
 	}
 
-	os.Remove(f.Name())
+	_ = os.Remove(f.Name())
 	_, err = NewStorage(f.Name(), "pre")
 	if err == nil {
 		t.Error("NewStorage must fail with non-existent directory")
@@ -48,11 +48,7 @@ func testStorageBadConstruction(t *testing.T) {
 func testStorageLookup(t *testing.T) {
 	t.Parallel()
 
-	d, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(d)
+	d := t.TempDir()
 
 	s, err := NewStorage(d, "pre")
 	if err != nil {
@@ -80,12 +76,12 @@ func testStorageLookup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tempfile.Close()
+		_ = tempfile.Close()
 
 		if err := s.StoreLink(fi, tempfile.Name()); err != nil {
 			t.Fatal(err)
 		}
-		os.Remove(tempfile.Name())
+		_ = os.Remove(tempfile.Name())
 	}
 
 	fi, err := makeFileInfo("a/b/c", []byte{'a', 'b', 'd'})
@@ -109,7 +105,10 @@ func testStorageLookup(t *testing.T) {
 		t.Error(`fi3 == nil`)
 	}
 
-	s.Save()
+	err = s.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s2, err := NewStorage(d, "ubuntu")
 	if err != nil {
@@ -161,11 +160,7 @@ func testStorageLookup(t *testing.T) {
 func testStorageStore(t *testing.T) {
 	t.Parallel()
 
-	d, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(d)
+	d := t.TempDir()
 
 	s, err := NewStorage(d, "pre")
 	if err != nil {
@@ -182,7 +177,7 @@ func testStorageStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	fi, err := apt.CopyWithFileInfo(tempfile, strings.NewReader("abc"), "a/b/c")
-	tempfile.Close()
+	_ = tempfile.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +192,7 @@ func testStorageStore(t *testing.T) {
 
 	// duplicates should not be granted
 	err = s.StoreLink(fi, tempfile.Name())
-	os.Remove(tempfile.Name())
+	_ = os.Remove(tempfile.Name())
 	if err == nil {
 		t.Error(`err == nil`)
 	}
@@ -207,9 +202,12 @@ func testStorageStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	fi, err = apt.CopyWithFileInfo(tempfile, strings.NewReader("def"), "a/b/c")
-	tempfile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tempfile.Close()
 	err = s.StoreLinkWithHash(fi, tempfile.Name())
-	os.Remove(tempfile.Name())
+	_ = os.Remove(tempfile.Name())
 	if err != nil {
 		t.Error(err)
 	}

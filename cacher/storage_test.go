@@ -16,8 +16,8 @@ func insert(cm *Storage, data []byte, path string) (*apt.FileInfo, error) {
 		return nil, err
 	}
 	defer func() {
-		f.Close()
-		os.Remove(f.Name())
+		_ = f.Close()
+		_ = os.Remove(f.Name())
 	}()
 
 	fi, err := apt.CopyWithFileInfo(f, bytes.NewReader(data), path)
@@ -36,11 +36,7 @@ func insert(cm *Storage, data []byte, path string) (*apt.FileInfo, error) {
 
 func testStorageInsertWorksCorrectly(t *testing.T) {
 	t.Parallel()
-	dir, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cm := NewStorage(dir, 0)
 
 	fi, err := insert(cm, []byte("a"), "path/to/a")
@@ -60,19 +56,15 @@ func testStorageInsertWorksCorrectly(t *testing.T) {
 
 func testStorageInsertOverwrite(t *testing.T) {
 	t.Parallel()
-	dir, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cm := NewStorage(dir, 0)
 
-	fi, err := insert(cm, []byte("a"), "path/to/a")
+	_, err := insert(cm, []byte("a"), "path/to/a")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	fi, err = insert(cm, []byte("a"), "path/to/a")
+	fi, err := insert(cm, []byte("a"), "path/to/a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +81,7 @@ func testStorageInsertOverwrite(t *testing.T) {
 
 func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 	t.Parallel()
-	dir, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cm := NewStorage(dir, 0)
 
 	cases := []struct{ Title, Path string }{
@@ -125,7 +113,7 @@ func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.Title, func(t *testing.T) {
-			_, err = insert(cm, []byte("a"), tc.Path)
+			_, err := insert(cm, []byte("a"), tc.Path)
 			if err != ErrBadPath {
 				t.Fatal(err)
 			}
@@ -135,11 +123,7 @@ func testStorageInsertReturnsErrorAgainstBadPath(t *testing.T) {
 
 func testStorageInsertPurgesFilesAllowingLRU(t *testing.T) {
 	t.Parallel()
-	dir, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cm := NewStorage(dir, 3)
 
 	fiA, err := insert(cm, []byte("a"), "a")
@@ -228,11 +212,7 @@ func TestStorageLoad(t *testing.T) {
 		"ghij": {'g', 'h', 'i', 'j'},
 	}
 
-	dir, err := os.MkdirTemp("", "gotest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	for k, v := range files {
 		err := os.WriteFile(filepath.Join(dir, k+fileSuffix), v, 0644)
@@ -242,13 +222,16 @@ func TestStorageLoad(t *testing.T) {
 	}
 
 	// dummy should be ignored as it does not have a proper suffix.
-	err = os.WriteFile(filepath.Join(dir, "dummy"), []byte{'d'}, 0644)
+	err := os.WriteFile(filepath.Join(dir, "dummy"), []byte{'d'}, 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cm := NewStorage(dir, 0)
-	cm.Load()
+	err = cm.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	l := cm.ListAll()
 	if len(l) != len(files) {
@@ -263,7 +246,7 @@ func TestStorageLoad(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	fA.Close()
+	_ = fA.Close()
 	fiBC, err := makeFileInfo("bc", files["bc"])
 	if err != nil {
 		t.Error(err)
@@ -272,7 +255,7 @@ func TestStorageLoad(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	fBC.Close()
+	_ = fBC.Close()
 	fiDEF, err := makeFileInfo("def", files["def"])
 	if err != nil {
 		t.Error(err)
@@ -281,7 +264,7 @@ func TestStorageLoad(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	fDEF.Close()
+	_ = fDEF.Close()
 
 	fiGHIJ, err := makeFileInfo("ghij", files["ghij"])
 	if err != nil {
@@ -293,7 +276,7 @@ func TestStorageLoad(t *testing.T) {
 	}
 
 	data, err := io.ReadAll(fGHIJ)
-	fGHIJ.Close()
+	_ = fGHIJ.Close()
 	if err != nil {
 		t.Fatal(err)
 	}

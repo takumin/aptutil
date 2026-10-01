@@ -63,7 +63,7 @@ func TestAcquireByHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, d, err := ExtractFileInfo("ubuntu/dists/trusty/Release", f)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestGetFilesFromRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, d, err := ExtractFileInfo("ubuntu/dists/trusty/Release", f)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestGetFilesFromPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, _, err := ExtractFileInfo("ubuntu/dists/testing/main/binary-amd64/Packages", f)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestGetFilesFromSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, _, err := ExtractFileInfo("ubuntu/dists/testing/main/source/Sources.gz", f)
 	if err != nil {
@@ -247,7 +247,7 @@ func TestGetFilesFromIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, _, err := ExtractFileInfo("ubuntu/dists/trusty/main/i18n/Index", f)
 	if err != nil {
@@ -285,7 +285,7 @@ func TestExtractFileInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, _, err := ExtractFileInfo("ubuntu/dists/testing/Release.gpg", f)
 	if err != nil {
@@ -697,7 +697,7 @@ func TestExtractFileInfoWithXZ(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fil, _, err := ExtractFileInfo("ubuntu/dists/testing/Packages.xz", f)
 	if err != nil {

@@ -431,7 +431,7 @@ func ExtractFileInfo(p string, r io.Reader) ([]*FileInfo, Paragraph, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 		base = base[:len(base)-3]
 	case ".bz2":

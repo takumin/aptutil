@@ -140,7 +140,7 @@ func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap map[string][]*ap
 		}
 
 		fil, _, err := apt.ExtractFileInfo(p, f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return err
 		}
@@ -159,7 +159,7 @@ func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap map[string][]*ap
 
 func (m *Mirror) replaceLink() error {
 	tname := filepath.Join(m.dir, m.id+".tmp")
-	os.Remove(tname)
+	_ = os.Remove(tname)
 	err := os.Symlink(filepath.Join(m.storage.Dir(), m.id), tname)
 	if err != nil {
 		return err
@@ -282,13 +282,13 @@ type dlResult struct {
 }
 
 func closeRespBody(r *http.Response) {
-	io.Copy(io.Discard, r.Body)
-	r.Body.Close()
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
 }
 
 func closeAndRemoveFile(f *os.File) {
-	f.Close()
-	os.Remove(f.Name())
+	_ = f.Close()
+	_ = os.Remove(f.Name())
 }
 
 // download is a goroutine to download an item.
@@ -585,7 +585,7 @@ func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 	// by closing results channel.
 	defer func() {
 		env.Stop()
-		env.Wait()
+		_ = env.Wait()
 		close(results)
 	}()
 

@@ -43,7 +43,7 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("status %d", status), status)
 	default:
 		// http.StatusOK
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		if r.Method == "GET" {
 			var zeroTime time.Time
 			http.ServeContent(w, r, path.Base(p), zeroTime, f)

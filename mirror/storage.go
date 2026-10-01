@@ -66,7 +66,7 @@ func (s *Storage) Load() error {
 	case err != nil:
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	jd := json.NewDecoder(f)
 	err = jd.Decode(&s.info)

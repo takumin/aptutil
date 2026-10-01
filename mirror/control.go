@@ -120,14 +120,14 @@ func Run(c *Config, mirrors []string) error {
 	case err != nil:
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fl := Flock{f}
 	err = fl.Lock()
 	if err != nil {
 		return err
 	}
-	defer fl.Unlock()
+	defer func() { _ = fl.Unlock() }()
 
 	if len(mirrors) == 0 {
 		for id := range c.Mirrors {

@@ -133,7 +133,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 			panic("there should always be a prefix!")
 		}
 		fil, _, err := apt.ExtractFileInfo(t[1], f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return nil, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
 		}
@@ -225,8 +225,8 @@ func (c *Cacher) maintRelease(ctx context.Context, p string, withGPG bool) {
 }
 
 func closeRespBody(r *http.Response) {
-	io.Copy(io.Discard, r.Body)
-	r.Body.Close()
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
 }
 
 // Download downloads an item and caches it.
@@ -339,8 +339,8 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		return
 	}
 	defer func() {
-		tempfile.Close()
-		os.Remove(tempfile.Name())
+		_ = tempfile.Close()
+		_ = os.Remove(tempfile.Name())
 	}()
 
 	fi, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)

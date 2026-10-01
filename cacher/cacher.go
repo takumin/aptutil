@@ -17,14 +17,19 @@ import (
 	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
+	"github.com/cybozu-go/aptutil/internal/stall"
 	"github.com/cybozu-go/log"
 	"github.com/cybozu-go/well"
 	"github.com/pkg/errors"
 )
 
 const (
-	gib            = 1 << 30
-	requestTimeout = 30 * time.Minute
+	gib = 1 << 30
+
+	// stallTimeout is how long a request to an upstream server may make
+	// no progress, either waiting for the response header or reading
+	// the body, before it is aborted.
+	stallTimeout = 1 * time.Minute
 )
 
 // addPrefix add prefix for each *FileInfo in fil.
@@ -64,6 +69,9 @@ type Cacher struct {
 	cachePeriod   time.Duration
 	client        *http.Client
 	maxConns      int
+
+	// stallTimeout aborts a request that makes no progress for it.
+	stallTimeout time.Duration
 
 	fiLock sync.RWMutex
 	// info has FileInfo of meta data files and items listed in them.
@@ -179,6 +187,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		cachePeriod:   cachePeriod,
 		client:        &http.Client{Transport: newTransport(config.MaxConns)},
 		maxConns:      config.MaxConns,
+		stallTimeout:  stallTimeout,
 		info:          make(map[string]*apt.FileInfo),
 		aliases:       make(map[string]*apt.FileInfo),
 		listed:        make(map[string][]string),
@@ -241,9 +250,11 @@ func newTransport(maxConns int) *http.Transport {
 	return transport
 }
 
-func (c *Cacher) acquireSemaphore(host string) {
+// acquireSemaphore waits for a slot to connect to host.
+// It returns ctx.Err() if ctx is canceled meanwhile.
+func (c *Cacher) acquireSemaphore(ctx context.Context, host string) error {
 	if c.maxConns == 0 {
-		return
+		return ctx.Err()
 	}
 
 	c.hostLock.Lock()
@@ -257,9 +268,15 @@ func (c *Cacher) acquireSemaphore(host string) {
 	}
 	c.hostLock.Unlock()
 
-	<-sem
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sem:
+		return nil
+	}
 }
 
+// releaseSemaphore releases the slot acquired by acquireSemaphore.
 func (c *Cacher) releaseSemaphore(host string) {
 	if c.maxConns == 0 {
 		return
@@ -412,12 +429,9 @@ func (c *Cacher) target(p string) (string, *apt.FileInfo) {
 
 // download is a goroutine to download p and store it at dest.
 func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid *apt.FileInfo, t *dlTask) {
-	c.acquireSemaphore(u.Host)
-
 	statusCode := http.StatusInternalServerError
 
 	defer func() {
-		c.releaseSemaphore(u.Host)
 		status := &dlStatus{code: statusCode}
 		c.dlLock.Lock()
 		delete(c.dlTasks, p)
@@ -443,8 +457,11 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		})
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
+	// ctx is canceled only on shutdown.
+	if err := c.acquireSemaphore(ctx, u.Host); err != nil {
+		return
+	}
+	defer c.releaseSemaphore(u.Host)
 
 	// imitation apt-get command
 	// NOTE: apt-get sets If-Modified-Since and makes a request to the server,
@@ -461,16 +478,24 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		ProtoMinor: 1,
 		Header:     header,
 	}
-	resp, err := c.client.Do(req.WithContext(ctx))
+	reqCtx, watcher := stall.Watch(ctx, c.stallTimeout)
+	defer watcher.Stop()
+	resp, err := c.client.Do(req.WithContext(reqCtx))
 	if err != nil {
+		err = stall.Error(reqCtx, err)
 		log.Warn("GET failed", map[string]interface{}{
 			"url":   u.String(),
 			"error": err.Error(),
 		})
+		if errors.Is(err, stall.ErrStalled) {
+			statusCode = http.StatusGatewayTimeout
+		}
 		return
 	}
 
+	// the watcher must be stopped after the body is closed.
 	defer closeRespBody(resp)
+	resp.Body = watcher.Wrap(resp.Body)
 	statusCode = resp.StatusCode
 	if statusCode != http.StatusOK {
 		return
@@ -500,10 +525,14 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 
 	fi, err := apt.CopyWithFileInfo(tempfile, resp.Body, dest)
 	if err != nil {
+		err = stall.Error(reqCtx, err)
 		log.Warn("GET failed", map[string]interface{}{
 			"url":   u.String(),
 			"error": err.Error(),
 		})
+		if errors.Is(err, stall.ErrStalled) {
+			statusCode = http.StatusGatewayTimeout
+		}
 		return
 	}
 	err = tempfile.Sync()
@@ -778,10 +807,13 @@ func (c *Cacher) Head(ctx context.Context, p string) (statusCode int, size int64
 	}
 
 	u := c.um.URL(p)
-	c.acquireSemaphore(u.Host)
+	if err := c.acquireSemaphore(ctx, u.Host); err != nil {
+		return http.StatusServiceUnavailable, -1, err
+	}
 	defer c.releaseSemaphore(u.Host)
 
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	// a response to HEAD has no body to watch.
+	reqCtx, cancel := context.WithTimeout(ctx, c.stallTimeout)
 	defer cancel()
 
 	header := http.Header{}
@@ -796,14 +828,17 @@ func (c *Cacher) Head(ctx context.Context, p string) (statusCode int, size int64
 		ProtoMinor: 1,
 		Header:     header,
 	}
-	resp, err := c.client.Do(req.WithContext(ctx))
+	resp, err := c.client.Do(req.WithContext(reqCtx))
 	if err != nil {
 		log.Warn("HEAD failed", map[string]interface{}{
 			"url":   u.String(),
 			"error": err.Error(),
 		})
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			return http.StatusServiceUnavailable, -1, ctx.Err()
+		case reqCtx.Err() != nil:
+			return http.StatusGatewayTimeout, -1, nil
 		}
 		return http.StatusInternalServerError, -1, nil
 	}

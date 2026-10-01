@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -208,6 +210,33 @@ func TestCacherResultInvalidation(t *testing.T) {
 	c.dlLock.Unlock()
 	if !ok {
 		t.Error("the result of the newer download was invalidated")
+	}
+}
+
+func TestCacherGetInsertFailure(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	// a regular file where a directory is needed makes Insert fail.
+	if err := os.WriteFile(filepath.Join(c.items.dir, "ubuntu"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, f, err := c.Get(context.Background(), "ubuntu/pool/a.deb")
+	if f != nil {
+		_ = f.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", status, http.StatusInternalServerError)
 	}
 }
 

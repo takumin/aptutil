@@ -460,13 +460,16 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	// To keep consistency between Cacher and Storage so that
 	// both have the same set of FileInfo, storage.Insert need to be
 	// guarded by c.fiLock.
-	if err := storage.Insert(tempfile.Name(), fi); err != nil {
+	err = storage.Insert(tempfile.Name(), fi)
+	if err != nil {
+		// Storage stays consistent with c.info even if Insert fails;
+		// the item is just not cached and will be downloaded again.
 		log.Error("could not save an item", map[string]interface{}{
 			"path":  p,
 			"error": err.Error(),
 		})
-		// panic because go-apt-cacher cannot continue working
-		panic(err)
+		statusCode = http.StatusInternalServerError
+		return
 	}
 
 	if parsed {

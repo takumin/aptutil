@@ -36,6 +36,16 @@ total size of cached files exceeds the given capacity.
 Items not listed in any meta data file are served from the cache as is
 without validation.
 
+By-hash retrieval
+-----------------
+
+If `Release` or `InRelease` has `Acquire-By-Hash: yes`, APT retrieves
+indices such as `Packages` via [by-hash][] paths.  go-apt-cacher treats
+a by-hash path as an alias of the file listed in `Release` with the
+checksum.  A file retrieved via a by-hash path is validated against the
+checksum, and cached and parsed as the listed file.  Requests for the
+by-hash path and the listed path are then served from the same cache.
+
 Note that go-apt-cacher does _not_ reference cache-related HTTP headers
 such as "Last-Modified" or "Cache-Control" at all.
 
@@ -73,12 +83,13 @@ the information need to be recovered.  To do it, go-apt-cacher scans all
 cached meta data files and finds checksums before accepting requests.
 
 [RepositoryFormat]: https://wiki.debian.org/RepositoryFormat
+[by-hash]: https://wiki.debian.org/DebianRepository/Format#indices_acquisition_via_hashsums_.28by-hash.29
 
 Compression support
 -------------------
 
-As Go does not provide the standard way to decompress .xz files,
-go-apt-cacher ignores requests for .xz and returns 404 Not Found response.
+go-apt-cacher can decompress meta data files compressed with gzip,
+bzip2, or xz.
 
-Other optional compression algorithms such as .lzma or .lz are handled
-the same as .xz.
+For meta data files compressed with other algorithms such as .lzma or
+.lz, go-apt-cacher returns 404 Not Found response.

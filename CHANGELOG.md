@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
   being cached.
 - [cacher] Memory grew without bound because file info entries of
   superseded packages were never removed.
+- [cacher] Indices retrieved via by-hash paths were neither validated
+  nor parsed, so items listed in them were not validated either.
 - [cacher] Memory grew without bound because file info entries of items
   not listed in any meta data file were never removed.
 - [cacher] Cached items not listed in any meta data file were downloaded

@@ -36,6 +36,25 @@ func addPrefix(prefix string, fil []*apt.FileInfo) []*apt.FileInfo {
 	return ret
 }
 
+// byHashAliases returns fil keyed by their by-hash paths.
+//
+// Meta data files compressed in unsupported formats are omitted as
+// they cannot be cached as meta data files.
+func byHashAliases(fil []*apt.FileInfo) map[string]*apt.FileInfo {
+	m := make(map[string]*apt.FileInfo)
+	for _, fi := range fil {
+		if apt.IsMeta(fi.Path()) && !apt.IsSupported(fi.Path()) {
+			continue
+		}
+		for _, hp := range []string{fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
+			if hp != "" {
+				m[hp] = fi
+			}
+		}
+	}
+	return m
+}
+
 // Cacher downloads and caches APT indices and deb files.
 type Cacher struct {
 	meta          *Storage
@@ -50,9 +69,12 @@ type Cacher struct {
 	// info has FileInfo of meta data files and items listed in them.
 	// Items not listed anywhere are looked up by path in Storage.
 	info map[string]*apt.FileInfo
-	// listed maps a meta data file to the items it lists, and refs counts
-	// how many meta data files list each item.  They are used to remove
-	// stale entries from info when meta data files are updated.
+	// aliases maps by-hash paths to FileInfo of the files they refer.
+	aliases map[string]*apt.FileInfo
+	// listed maps a meta data file to the items and by-hash paths it
+	// lists, and refs counts how many meta data files list each of them.
+	// They are used to remove stale entries from info and aliases when
+	// meta data files are updated.
 	listed map[string][]string
 	refs   map[string]int
 
@@ -158,6 +180,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 		client:        &http.Client{Transport: newTransport(config.MaxConns)},
 		maxConns:      config.MaxConns,
 		info:          make(map[string]*apt.FileInfo),
+		aliases:       make(map[string]*apt.FileInfo),
 		listed:        make(map[string][]string),
 		refs:          make(map[string]int),
 		dlTasks:       make(map[string]*dlTask),
@@ -175,12 +198,17 @@ func NewCacher(config *Config) (*Cacher, error) {
 		if len(t) != 2 {
 			panic("there should always be a prefix!")
 		}
-		fil, _, err := apt.ExtractFileInfo(t[1], f)
+		fil, d, err := apt.ExtractFileInfo(t[1], f)
 		_ = f.Close()
 		if err != nil {
 			return nil, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
 		}
-		c.updateListed(fi.Path(), addPrefix(t[0], fil))
+		fil = addPrefix(t[0], fil)
+		var aliases map[string]*apt.FileInfo
+		if apt.SupportByHash(d) {
+			aliases = byHashAliases(fil)
+		}
+		c.updateListed(fi.Path(), fil, aliases)
 	}
 
 	// add meta files w/o checksums (Release, Release.gpg, and InRelease).
@@ -315,7 +343,7 @@ func (c *Cacher) Download(p string, valid *apt.FileInfo) <-chan struct{} {
 	c.dlLock.Lock()
 	defer c.dlLock.Unlock()
 
-	t := c.startDownload(p, valid)
+	t := c.startDownload(p, p, valid)
 	if t == nil {
 		return nil
 	}
@@ -323,11 +351,12 @@ func (c *Cacher) Download(p string, valid *apt.FileInfo) <-chan struct{} {
 }
 
 // startDownload starts downloading p unless it is already in progress,
-// and returns the task for it.  If prefix of p is not registered
-// in URLMap, nil is returned.
+// and returns the task for it.  The downloaded item is stored at dest,
+// which differs from p if p is a by-hash path.  If prefix of p is not
+// registered in URLMap, nil is returned.
 //
 // c.dlLock must be held.
-func (c *Cacher) startDownload(p string, valid *apt.FileInfo) *dlTask {
+func (c *Cacher) startDownload(p, dest string, valid *apt.FileInfo) *dlTask {
 	u := c.um.URL(p)
 	if u == nil {
 		return nil
@@ -342,7 +371,7 @@ func (c *Cacher) startDownload(p string, valid *apt.FileInfo) *dlTask {
 	t = &dlTask{done: make(chan struct{}), refs: 1}
 	c.dlTasks[p] = t
 	well.Go(func(ctx context.Context) error {
-		c.download(ctx, p, u, valid, t)
+		c.download(ctx, p, dest, u, valid, t)
 		return nil
 	})
 	return t
@@ -369,8 +398,20 @@ func (c *Cacher) storage(p string) *Storage {
 	return c.items
 }
 
-// download is a goroutine to download an item.
-func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.FileInfo, t *dlTask) {
+// target returns the path where the item at p is stored, and FileInfo
+// to validate it if known.  For a by-hash path, the path of the file
+// it refers is returned so that the file is cached and parsed as such.
+//
+// c.fiLock must be held.
+func (c *Cacher) target(p string) (string, *apt.FileInfo) {
+	if fi, ok := c.aliases[p]; ok {
+		return fi.Path(), fi
+	}
+	return p, c.info[p]
+}
+
+// download is a goroutine to download p and store it at dest.
+func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid *apt.FileInfo, t *dlTask) {
 	c.acquireSemaphore(u.Host)
 
 	statusCode := http.StatusInternalServerError
@@ -440,7 +481,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	// does not mistake them for success and retry immediately.
 	statusCode = http.StatusBadGateway
 
-	storage := c.storage(p)
+	storage := c.storage(dest)
 	tempfile, err := storage.TempFile()
 	if err != nil {
 		log.Warn("GET failed", map[string]interface{}{
@@ -457,7 +498,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		}
 	}()
 
-	fi, err := apt.CopyWithFileInfo(tempfile, resp.Body, p)
+	fi, err := apt.CopyWithFileInfo(tempfile, resp.Body, dest)
 	if err != nil {
 		log.Warn("GET failed", map[string]interface{}{
 			"url":   u.String(),
@@ -481,9 +522,10 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	}
 
 	var fil []*apt.FileInfo
+	var aliases map[string]*apt.FileInfo
 	parsed := false
 
-	if t := strings.SplitN(path.Clean(p), "/", 2); len(t) == 2 && apt.IsMeta(t[1]) {
+	if t := strings.SplitN(path.Clean(dest), "/", 2); len(t) == 2 && apt.IsMeta(t[1]) {
 		_, err = tempfile.Seek(0, io.SeekStart)
 		if err != nil {
 			log.Error("failed to reset tempfile offset", map[string]interface{}{
@@ -492,10 +534,11 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 			return
 		}
 
-		fil, _, err = apt.ExtractFileInfo(t[1], tempfile)
+		var d apt.Paragraph
+		fil, d, err = apt.ExtractFileInfo(t[1], tempfile)
 		if err != nil {
 			log.Error("invalid meta data", map[string]interface{}{
-				"path":  p,
+				"path":  dest,
 				"error": err.Error(),
 			})
 			// do not return; we accept broken meta data as is.
@@ -503,6 +546,9 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 			parsed = true
 		}
 		fil = addPrefix(t[0], fil)
+		if parsed && apt.SupportByHash(d) {
+			aliases = byHashAliases(fil)
+		}
 	}
 
 	c.fiLock.Lock()
@@ -517,7 +563,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		// Hand the downloaded file over to the waiters in Get
 		// without caching it.
 		log.Warn("serving an item without caching as it exceeds cache_capacity", map[string]interface{}{
-			"path": p,
+			"path": dest,
 			"size": fi.Size(),
 		})
 		t.uncached = tempfile.Name()
@@ -528,7 +574,7 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 		// Storage stays consistent with c.info even if Insert fails;
 		// the item is just not cached and will be downloaded again.
 		log.Error("could not save an item", map[string]interface{}{
-			"path":  p,
+			"path":  dest,
 			"error": err.Error(),
 		})
 		statusCode = http.StatusInternalServerError
@@ -536,18 +582,18 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	}
 
 	if parsed {
-		c.updateListed(p, fil)
+		c.updateListed(dest, fil, aliases)
 	}
 	switch {
-	case apt.IsMeta(p):
-		_, ok := c.info[p]
+	case apt.IsMeta(dest):
+		_, ok := c.info[dest]
 		if !ok {
-			// As this is the first time that downloaded meta file p,
-			c.maintMeta(p)
+			// As this is the first time that downloaded meta file dest,
+			c.maintMeta(dest)
 		}
-		c.info[p] = fi
-	case c.refs[p] > 0:
-		c.info[p] = fi
+		c.info[dest] = fi
+	case c.refs[dest] > 0:
+		c.info[dest] = fi
 	}
 	// Other items are not kept in c.info so that it does not grow
 	// without bound; Get looks them up in Storage by path.
@@ -557,16 +603,21 @@ func (c *Cacher) download(ctx context.Context, p string, u *url.URL, valid *apt.
 	})
 }
 
-// updateListed registers fil as the items listed in the meta data file p,
-// replacing the items registered for the previous version of p.
-// Items no longer listed in any meta data file are removed from c.info.
+// updateListed registers fil as the items and aliases as the by-hash
+// paths listed in the meta data file p, replacing those registered for
+// the previous version of p.  Items and by-hash paths no longer listed
+// in any meta data file are removed from c.info and c.aliases.
 //
 // c.fiLock must be held for writing unless c is under construction.
-func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
-	paths := make([]string, 0, len(fil))
+func (c *Cacher) updateListed(p string, fil []*apt.FileInfo, aliases map[string]*apt.FileInfo) {
+	paths := make([]string, 0, len(fil)+len(aliases))
 	for _, fi := range fil {
 		paths = append(paths, fi.Path())
 		c.info[fi.Path()] = fi
+	}
+	for hp, fi := range aliases {
+		paths = append(paths, hp)
+		c.aliases[hp] = fi
 	}
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
@@ -581,6 +632,7 @@ func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
 		}
 		delete(c.refs, fp)
 		delete(c.info, fp)
+		delete(c.aliases, fp)
 	}
 
 	if len(paths) == 0 {
@@ -590,25 +642,26 @@ func (c *Cacher) updateListed(p string, fil []*apt.FileInfo) {
 	c.listed[p] = paths
 }
 
-// lookup looks up the cached item at p.
+// lookup looks up the cached item for p.
 //
-// It returns FileInfo to validate the item if known, and the cache
-// file.  If the item is not cached, the returned os.File is nil.
-func (c *Cacher) lookup(p string) (valid *apt.FileInfo, f *os.File, err error) {
+// It returns the path where the item is stored, FileInfo to validate
+// the item if known, and the cache file.  If the item is not cached,
+// the returned os.File is nil.
+func (c *Cacher) lookup(p string) (dest string, valid *apt.FileInfo, f *os.File, err error) {
 	c.fiLock.RLock()
-	valid = c.info[p]
+	dest, valid = c.target(p)
 	c.fiLock.RUnlock()
 
-	storage := c.storage(p)
+	storage := c.storage(dest)
 	if valid != nil {
 		f, err = storage.Lookup(valid)
 	} else {
-		f, err = storage.Open(p)
+		f, err = storage.Open(dest)
 	}
 	if errors.Is(err, ErrNotFound) {
-		return valid, nil, nil
+		return dest, valid, nil, nil
 	}
-	return valid, f, err
+	return dest, valid, f, err
 }
 
 // Get looks up a cached item, and if not found, downloads it
@@ -633,7 +686,7 @@ func (c *Cacher) Get(ctx context.Context, p string) (statusCode int, f *os.File,
 	}
 
 RETRY:
-	fi, f, err := c.lookup(p)
+	dest, fi, f, err := c.lookup(p)
 	switch {
 	case err != nil:
 		log.Error("lookup failure", map[string]interface{}{
@@ -650,7 +703,7 @@ RETRY:
 		c.dlLock.Unlock()
 		return result.code, nil, nil
 	}
-	t := c.startDownload(p, fi)
+	t := c.startDownload(p, dest, fi)
 	t.refs++
 	c.dlLock.Unlock()
 

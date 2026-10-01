@@ -114,12 +114,12 @@ func TestCacherUpdateListed(t *testing.T) {
 		c2 = "ubuntu/pool/c.deb"
 	)
 
-	c.updateListed(gz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")})
-	c.updateListed(xz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")})
+	c.updateListed(gz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")}, nil)
+	c.updateListed(xz, []*apt.FileInfo{mustFI(a, "a1"), mustFI(b, "b1")}, nil)
 
 	// Packages.gz is updated: a is replaced by c, and b is updated.
 	newB := mustFI(b, "b2")
-	c.updateListed(gz, []*apt.FileInfo{newB, mustFI(c2, "c1")})
+	c.updateListed(gz, []*apt.FileInfo{newB, mustFI(c2, "c1")}, nil)
 
 	for _, p := range []string{a, b, c2} {
 		if _, ok := c.info[p]; !ok {
@@ -131,7 +131,7 @@ func TestCacherUpdateListed(t *testing.T) {
 	}
 
 	// Packages.xz is updated as well; a is no longer listed anywhere.
-	c.updateListed(xz, []*apt.FileInfo{newB, mustFI(c2, "c1")})
+	c.updateListed(xz, []*apt.FileInfo{newB, mustFI(c2, "c1")}, nil)
 
 	if _, ok := c.info[a]; ok {
 		t.Errorf("%s should be removed", a)
@@ -146,8 +146,8 @@ func TestCacherUpdateListed(t *testing.T) {
 	}
 
 	// an empty list releases all items.
-	c.updateListed(gz, nil)
-	c.updateListed(xz, nil)
+	c.updateListed(gz, nil, nil)
+	c.updateListed(xz, nil, nil)
 	if len(c.refs) != 0 || len(c.listed) != 0 {
 		t.Errorf("refs = %v, listed = %v, want empty", c.refs, c.listed)
 	}

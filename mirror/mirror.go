@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
@@ -24,6 +26,10 @@ const (
 	timestampFormat  = "20060102_150405"
 	progressInterval = 5 * time.Minute
 	httpRetries      = 5
+
+	// reuseWorkers is the number of goroutines to look up and link
+	// items in the current mirror.  They mostly wait for system calls.
+	reuseWorkers = 16
 
 	// stallTimeout is how long a download may make no progress, either
 	// waiting for the response header or reading the body, before it
@@ -852,63 +858,136 @@ func (m *Mirror) downloadFiles(ctx context.Context,
 	return append(reused, downloaded...), nil
 }
 
+// reuse stores the item in the current mirror matching fi into the
+// storage if any, and returns its info.  It returns nil if none matches.
+func (m *Mirror) reuse(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, error) {
+	if m.current == nil {
+		return nil, nil
+	}
+	localfi, fullpath := m.current.Lookup(fi, byhash)
+	if localfi == nil {
+		return nil, nil
+	}
+	err := m.storeLink(localfi, fullpath, byhash)
+	if err != nil {
+		return nil, errors.Wrap(err, "storeLink")
+	}
+	if log.Enabled(log.LvDebug) {
+		log.Debug("reuse item", map[string]interface{}{
+			"repo": m.id,
+			"path": fi.Path(),
+		})
+	}
+	return localfi, nil
+}
+
 func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 	byhash bool, results chan<- *dlResult,
 ) ([]*apt.FileInfo, error) {
 	// environment to manage downloading goroutines.
-	env := well.NewEnvironment(ctx)
+	dlEnv := well.NewEnvironment(ctx)
 
 	// on return, wait for all DL goroutines then signal recvResult
 	// by closing results channel.
 	defer func() {
-		env.Stop()
-		_ = env.Wait()
+		dlEnv.Stop()
+		_ = dlEnv.Wait()
 		close(results)
 	}()
 
+	var mu sync.Mutex
 	reused := make([]*apt.FileInfo, 0, len(fil))
-	loggedAt := time.Now()
+	var processed, downloads atomic.Int64
 
-	for i, fi := range fil {
-		// avoid assignment
-		fi := fi
-		now := time.Now()
-		if now.Sub(loggedAt) > progressInterval {
-			loggedAt = now
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(progressInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			n, d := processed.Load(), downloads.Load()
 			log.Info("download progress", map[string]interface{}{
 				"repo":      m.id,
 				"total":     len(fil),
-				"reused":    len(reused),
-				"downloads": i - len(reused),
+				"reused":    n - d,
+				"downloads": d,
 			})
 		}
+	}()
 
-		if m.current != nil {
-			localfi, fullpath := m.current.Lookup(fi, byhash)
-			if localfi != nil {
-				err := m.storeLink(localfi, fullpath, byhash)
-				if err != nil {
-					return nil, errors.Wrap(err, "storeLink")
-				}
-				reused = append(reused, localfi)
-				if log.Enabled(log.LvDebug) {
-					log.Debug("reuse item", map[string]interface{}{
-						"repo": m.id,
-						"path": fi.Path(),
-					})
-				}
-				continue
+	// items are looked up for reuse by workers concurrently, so that
+	// they are not blocked by downloads waiting for the semaphore.
+	// items not reused are sent to missing to be downloaded.
+	env := well.NewEnvironment(ctx)
+	items := make(chan *apt.FileInfo)
+	missing := make(chan *apt.FileInfo)
+
+	env.Go(func(ctx context.Context) error {
+		defer close(items)
+		for _, fi := range fil {
+			select {
+			case items <- fi:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
+		return nil
+	})
 
-		if err := m.acquireSemaphore(ctx); err != nil {
-			return nil, err
-		}
-
+	var wg sync.WaitGroup
+	for range reuseWorkers {
+		wg.Add(1)
 		env.Go(func(ctx context.Context) error {
-			m.download(ctx, fi.Path(), fi, byhash, results)
+			defer wg.Done()
+			for fi := range items {
+				localfi, err := m.reuse(fi, byhash)
+				if err != nil {
+					return err
+				}
+				if localfi != nil {
+					mu.Lock()
+					reused = append(reused, localfi)
+					mu.Unlock()
+					processed.Add(1)
+					continue
+				}
+				select {
+				case missing <- fi:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
 			return nil
 		})
+	}
+	go func() {
+		wg.Wait()
+		close(missing)
+	}()
+
+	env.Go(func(ctx context.Context) error {
+		for fi := range missing {
+			if err := m.acquireSemaphore(ctx); err != nil {
+				return err
+			}
+			downloads.Add(1)
+			processed.Add(1)
+			dlEnv.Go(func(ctx context.Context) error {
+				m.download(ctx, fi.Path(), fi, byhash, results)
+				return nil
+			})
+		}
+		return nil
+	})
+
+	env.Stop()
+	if err := env.Wait(); err != nil {
+		return nil, err
 	}
 	return reused, nil
 }

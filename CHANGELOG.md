@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - [mirror] Sync downloaded files with a single syncfs(2) before
   publishing a mirror instead of calling fsync(2) on each file and
   directory.
+- [mirror] Reuse items of the current mirror concurrently, without
+  waiting for downloads of other items.
 
 ## [1.5.1] - 2026-10-02
 ### Changed

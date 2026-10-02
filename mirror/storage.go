@@ -23,6 +23,9 @@ type Storage struct {
 
 	mu   sync.RWMutex
 	info map[string]*apt.FileInfo
+
+	// dirs is the set of directories known to exist.
+	dirs sync.Map
 }
 
 // NewStorage constructs Storage.
@@ -117,6 +120,20 @@ func (s *Storage) Save() error {
 	return nil
 }
 
+// mkdirAll is os.MkdirAll that remembers the directories created, so
+// that storing many files in a directory does not check it every time.
+func (s *Storage) mkdirAll(d string) error {
+	if _, ok := s.dirs.Load(d); ok {
+		return nil
+	}
+	err := os.MkdirAll(d, 0o755)
+	if err != nil {
+		return err
+	}
+	s.dirs.Store(d, struct{}{})
+	return nil
+}
+
 // StoreLink stores a hard link to a file into this storage.
 func (s *Storage) StoreLink(fi *apt.FileInfo, fullpath string) error {
 	p := fi.Path()
@@ -133,7 +150,7 @@ func (s *Storage) StoreLink(fi *apt.FileInfo, fullpath string) error {
 	fp := filepath.Join(s.dir, s.prefix, filepath.Clean(p))
 	d := filepath.Dir(fp)
 
-	err := os.MkdirAll(d, 0o755)
+	err := s.mkdirAll(d)
 	if err != nil {
 		return err
 	}
@@ -193,7 +210,7 @@ func (s *Storage) StoreLinkWithHash(fi *apt.FileInfo, fullpath string) error {
 
 	for _, fp := range fpl {
 		d := filepath.Dir(fp)
-		err := os.MkdirAll(d, 0o755)
+		err := s.mkdirAll(d)
 		if err != nil {
 			return errors.Wrap(err, "StoreLinkWithHash: "+fp)
 		}

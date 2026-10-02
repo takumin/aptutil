@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -198,26 +199,12 @@ func NewCacher(config *Config) (*Cacher, error) {
 	}
 
 	metas := meta.ListAll()
-	for _, fi := range metas {
-		f, err := meta.Lookup(fi)
-		if err != nil {
-			return nil, errors.Wrap(err, "meta.Lookup")
-		}
-		t := strings.SplitN(fi.Path(), "/", 2)
-		if len(t) != 2 {
-			panic("there should always be a prefix!")
-		}
-		fil, d, err := apt.ExtractFileInfo(t[1], f)
-		_ = f.Close()
-		if err != nil {
-			return nil, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
-		}
-		fil = addPrefix(t[0], fil)
-		var aliases map[string]*apt.FileInfo
-		if apt.SupportByHash(d) {
-			aliases = byHashAliases(fil)
-		}
-		c.updateListed(fi.Path(), fil, aliases)
+	parsed, err := parseMetas(meta, metas)
+	if err != nil {
+		return nil, err
+	}
+	for i, fi := range metas {
+		c.updateListed(fi.Path(), parsed[i].fil, parsed[i].aliases)
 	}
 
 	// add meta files w/o checksums (Release, Release.gpg, and InRelease).
@@ -230,6 +217,62 @@ func NewCacher(config *Config) (*Cacher, error) {
 	}
 
 	return c, nil
+}
+
+// parsedMeta is the result of parsing an index by parseMetas.
+type parsedMeta struct {
+	fil     []*apt.FileInfo
+	aliases map[string]*apt.FileInfo
+}
+
+// parseMetas parses indices in meta concurrently, and returns the
+// results in the same order as metas.
+//
+// Decompressing and parsing indices takes most of the time to start
+// the cacher, and each index can be parsed independently.
+func parseMetas(meta *Storage, metas []*apt.FileInfo) ([]parsedMeta, error) {
+	parsed := make([]parsedMeta, len(metas))
+	errs := make([]error, len(metas))
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	for i, fi := range metas {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			parsed[i], errs[i] = parseMeta(meta, fi)
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return parsed, nil
+}
+
+// parseMeta parses an index in meta.
+func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
+	f, err := meta.Lookup(fi)
+	if err != nil {
+		return parsedMeta{}, errors.Wrap(err, "meta.Lookup")
+	}
+	defer func() { _ = f.Close() }()
+
+	t := strings.SplitN(fi.Path(), "/", 2)
+	if len(t) != 2 {
+		panic("there should always be a prefix!")
+	}
+	fil, d, err := apt.ExtractFileInfo(t[1], f)
+	if err != nil {
+		return parsedMeta{}, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
+	}
+	fil = addPrefix(t[0], fil)
+	var aliases map[string]*apt.FileInfo
+	if apt.SupportByHash(d) {
+		aliases = byHashAliases(fil)
+	}
+	return parsedMeta{fil: fil, aliases: aliases}, nil
 }
 
 // newTransport returns an http.Transport that keeps up to maxConns idle

@@ -370,8 +370,19 @@ func TestCacherGetTooLarge(t *testing.T) {
 	if n := c.items.Len(); n != 0 {
 		t.Errorf("cached items = %d, want 0", n)
 	}
-	if l := tempFiles(t, c.items.dir); len(l) != 0 {
-		t.Errorf("temporary files are left: %v", l)
+
+	// the downloading goroutine releases the task, and removes the
+	// file, after the waiters are woken up.
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		l := tempFiles(t, c.items.dir)
+		if len(l) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("temporary files are left: %v", l)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

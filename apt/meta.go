@@ -3,6 +3,7 @@ package apt
 // This file provides utilities for debian repository indices.
 
 import (
+	"bufio"
 	"compress/bzip2"
 	"compress/gzip"
 	"encoding/hex"
@@ -438,7 +439,9 @@ func ExtractFileInfo(p string, r io.Reader) ([]*FileInfo, Paragraph, error) {
 		r = bzip2.NewReader(r)
 		base = base[:len(base)-4]
 	case ".xz":
-		xzr, err := xz.NewReader(r)
+		// xz.Reader reads its input byte by byte, so buffer it to
+		// avoid issuing a read system call for every byte.
+		xzr, err := xz.NewReader(bufio.NewReader(r))
 		if err != nil {
 			return nil, nil, err
 		}

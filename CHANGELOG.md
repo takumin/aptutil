@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+- Buffer reads of xz-compressed indices, which made parsing them about
+  8 times faster.  go-apt-cacher starts listening much sooner as it
+  parses all cached indices before that.
 
 ## [1.5.0] - 2026-10-01
 ### Added

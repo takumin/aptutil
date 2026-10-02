@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [1.5.1] - 2026-10-02
 ### Changed
 - Buffer reads of xz-compressed indices, which made parsing them about
   8 times faster.  go-apt-cacher starts listening much sooner as it
@@ -203,7 +205,8 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/takumin/aptutil/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/takumin/aptutil/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/cybozu-go/aptutil/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/cybozu-go/aptutil/compare/v1.4.1...v1.4.2

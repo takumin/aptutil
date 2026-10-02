@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [1.5.2] - 2026-10-02
 ### Changed
 - [mirror] Scan only one of the compression formats of each index,
   preferring the fastest to decompress, instead of all of them.
@@ -214,7 +216,8 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/takumin/aptutil/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/takumin/aptutil/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/takumin/aptutil/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/cybozu-go/aptutil/compare/v1.4.2...v1.4.3

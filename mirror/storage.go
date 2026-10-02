@@ -102,19 +102,16 @@ func (s *Storage) Save() error {
 		return err
 	}
 
-	err = f.Sync()
-	if err != nil {
-		_ = f.Close()
-		return err
-	}
 	err = f.Close()
 	if err != nil {
 		return err
 	}
 
-	err = DirSyncTree(s.dir)
+	// files are not synced one by one when they are stored, so sync
+	// them all at once together with info.json and directories.
+	err = syncFS(s.dir)
 	if err != nil {
-		return errors.Wrap(err, "DirSyncTree(s.dir)")
+		return errors.Wrap(err, "syncFS(s.dir)")
 	}
 
 	return nil

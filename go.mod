@@ -6,6 +6,7 @@ require (
 	github.com/cybozu-go/well v1.11.2
 	github.com/pkg/errors v0.9.1
 	github.com/ulikunitz/xz v0.5.17
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -25,7 +26,6 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.59.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
 

@@ -611,11 +611,7 @@ RETRY:
 		r.err = err
 		return
 	}
-	err = tempfile.Sync()
-	if err != nil {
-		r.err = &localError{errors.Wrap(err, "tempfile.Sync")}
-		return
-	}
+	// tempfile is synced later by Storage.Save.
 	err = os.Chmod(tempfile.Name(), 0o644)
 	if err != nil {
 		r.err = &localError{errors.Wrap(err, "os.Chmod")}

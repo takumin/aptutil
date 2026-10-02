@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 - [mirror] Scan only one of the compression formats of each index,
   preferring the fastest to decompress, instead of all of them.
 - [mirror] Download indices of suites and scan them concurrently.
+- [mirror] Sync downloaded files with a single syncfs(2) before
+  publishing a mirror instead of calling fsync(2) on each file and
+  directory.
 
 ## [1.5.1] - 2026-10-02
 ### Changed

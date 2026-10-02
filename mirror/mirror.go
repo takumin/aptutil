@@ -164,12 +164,49 @@ func (m *Mirror) storeLink(fi *apt.FileInfo, fp string, byhash bool) error {
 	return m.storage.StoreLink(fi, fp)
 }
 
-func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[string]*apt.FileInfo, byhash bool) error {
+// indexPreference ranks the formats of an index by how fast they are
+// decompressed.  The smaller is the preferred.
+var indexPreference = map[string]int{
+	"":     0,
+	".gz":  1,
+	".xz":  2,
+	".bz2": 3,
+}
+
+// indicesToScan returns the indices to be scanned for items.
+//
+// An index is often available in several compression formats with the
+// same contents as verified by checksums in Release, so only the one
+// fastest to decompress is returned for each.
+func (m *Mirror) indicesToScan(indices []*apt.FileInfo) []*apt.FileInfo {
+	best := make(map[string]*apt.FileInfo)
 	for _, index := range indices {
 		p := index.Path()
 		if !m.mc.MatchingIndex(p) || !apt.IsSupported(p) {
 			continue
 		}
+		ext := path.Ext(p)
+		rank, ok := indexPreference[ext]
+		if !ok {
+			continue
+		}
+		key := strings.TrimSuffix(p, ext)
+		if cur, ok := best[key]; ok && indexPreference[path.Ext(cur.Path())] <= rank {
+			continue
+		}
+		best[key] = index
+	}
+
+	l := make([]*apt.FileInfo, 0, len(best))
+	for _, index := range best {
+		l = append(l, index)
+	}
+	return l
+}
+
+func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[string]*apt.FileInfo, byhash bool) error {
+	for _, index := range m.indicesToScan(indices) {
+		p := index.Path()
 		openPath := p
 		if hp := byHashPath(index); byhash && hp != "" {
 			openPath = hp

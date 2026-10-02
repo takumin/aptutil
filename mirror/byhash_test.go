@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -199,5 +201,42 @@ func TestStorageReuseByHashPartialChecksums(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(byhash, name)); !os.IsNotExist(err) {
 			t.Errorf("by-hash/%s must not exist: %v", name, err)
 		}
+	}
+}
+
+func TestMirrorIndicesToScan(t *testing.T) {
+	t.Parallel()
+
+	m := newTestMirror(t, "http://example.com")
+	m.mc.Suites = []string{"s"}
+	m.mc.Sections = []string{"main"}
+	m.mc.Architectures = []string{"amd64"}
+
+	var indices []*apt.FileInfo
+	for _, p := range []string{
+		"main/binary-amd64/Packages.bz2",
+		"main/binary-amd64/Packages.xz",
+		"main/binary-amd64/Packages.gz",
+		"main/binary-all/Packages.bz2",
+		"main/binary-all/Packages.xz",
+		"main/binary-all/Packages.lzma",
+		"main/binary-i386/Packages.gz",
+		"main/i18n/Index",
+	} {
+		indices = append(indices, apt.MakeFileInfoNoChecksum(path.Join("dists/s", p), 0))
+	}
+
+	var got []string
+	for _, fi := range m.indicesToScan(indices) {
+		got = append(got, fi.Path())
+	}
+	sort.Strings(got)
+	want := []string{
+		"dists/s/main/binary-all/Packages.xz",
+		"dists/s/main/binary-amd64/Packages.gz",
+		"dists/s/main/i18n/Index",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("indicesToScan = %v, want %v", got, want)
 	}
 }

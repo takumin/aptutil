@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+- [mirror] Scan only one of the compression formats of each index,
+  preferring the fastest to decompress, instead of all of them.
 
 ## [1.5.1] - 2026-10-02
 ### Changed

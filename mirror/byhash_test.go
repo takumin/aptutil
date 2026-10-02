@@ -138,7 +138,12 @@ func TestMirrorExtractItemsByHashPartialChecksums(t *testing.T) {
 	}
 
 	itemMap := make(map[string]*apt.FileInfo)
-	err := m.extractItems([]*apt.FileInfo{fi}, map[string]*apt.FileInfo{}, itemMap, true)
+	suites := []*suiteIndices{{
+		indexMap: map[string]*apt.FileInfo{},
+		indices:  []*apt.FileInfo{fi},
+		byhash:   true,
+	}}
+	err := m.extractItems(context.Background(), suites, itemMap)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -204,27 +205,77 @@ func (m *Mirror) indicesToScan(indices []*apt.FileInfo) []*apt.FileInfo {
 	return l
 }
 
-func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[string]*apt.FileInfo, byhash bool) error {
-	for _, index := range m.indicesToScan(indices) {
-		p := index.Path()
-		openPath := p
-		if hp := byHashPath(index); byhash && hp != "" {
-			openPath = hp
-		}
-		f, err := m.storage.Open(openPath)
-		if err != nil {
-			return err
-		}
+// suiteIndices is the indices of a suite downloaded by updateSuite.
+type suiteIndices struct {
+	// indexMap is the indices listed in Release/InRelease.
+	indexMap map[string]*apt.FileInfo
+	// indices is the indices downloaded or reused.
+	indices []*apt.FileInfo
+	byhash  bool
+}
 
-		fil, _, err := apt.ExtractFileInfo(p, f)
-		_ = f.Close()
-		if err != nil {
-			return err
-		}
+// scanIndex returns the items listed in an index.
+func (m *Mirror) scanIndex(index *apt.FileInfo, byhash bool) ([]*apt.FileInfo, error) {
+	p := index.Path()
+	openPath := p
+	if hp := byHashPath(index); byhash && hp != "" {
+		openPath = hp
+	}
+	f, err := m.storage.Open(openPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
 
-		for _, fi := range fil {
+	fil, _, err := apt.ExtractFileInfo(p, f)
+	return fil, err
+}
+
+// extractItems scans indices of suites concurrently, and adds the items
+// listed in them to itemMap.
+func (m *Mirror) extractItems(ctx context.Context, suites []*suiteIndices, itemMap map[string]*apt.FileInfo) error {
+	type scan struct {
+		suite *suiteIndices
+		index *apt.FileInfo
+		fil   []*apt.FileInfo
+	}
+
+	var scans []*scan
+	for _, s := range suites {
+		for _, index := range m.indicesToScan(s.indices) {
+			scans = append(scans, &scan{suite: s, index: index})
+		}
+	}
+
+	// decompressing and parsing indices is CPU bound.
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	env := well.NewEnvironment(ctx)
+	for _, sc := range scans {
+		env.Go(func(ctx context.Context) error {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			defer func() { <-sem }()
+
+			fil, err := m.scanIndex(sc.index, sc.suite.byhash)
+			if err != nil {
+				return err
+			}
+			sc.fil = fil
+			return nil
+		})
+	}
+	env.Stop()
+	if err := env.Wait(); err != nil {
+		return err
+	}
+
+	for _, sc := range scans {
+		for _, fi := range sc.fil {
 			fipath := fi.Path()
-			if _, ok := indexMap[fipath]; ok {
+			if _, ok := sc.suite.indexMap[fipath]; ok {
 				// already included in Release/InRelease
 				continue
 			}
@@ -232,7 +283,7 @@ func (m *Mirror) extractItems(indices []*apt.FileInfo, indexMap, itemMap map[str
 			// suite must not list a different file for it.
 			if existing, ok := itemMap[fipath]; ok {
 				if existing.Conflicts(fi) {
-					return errors.New("inconsistent checksum for " + fipath + " in " + p)
+					return errors.New("inconsistent checksum for " + fipath + " in " + sc.index.Path())
 				}
 				continue
 			}
@@ -266,13 +317,28 @@ func (m *Mirror) replaceLink() error {
 
 // Update updates mirrored files.
 func (m *Mirror) Update(ctx context.Context) error {
-	itemMap := make(map[string]*apt.FileInfo)
+	// download indices of suites concurrently.
+	suites := make([]*suiteIndices, len(m.mc.Suites))
+	env := well.NewEnvironment(ctx)
+	for i, suite := range m.mc.Suites {
+		env.Go(func(ctx context.Context) error {
+			si, err := m.updateSuite(ctx, suite)
+			if err != nil {
+				return err
+			}
+			suites[i] = si
+			return nil
+		})
+	}
+	env.Stop()
+	if err := env.Wait(); err != nil {
+		return err
+	}
 
-	for _, suite := range m.mc.Suites {
-		err := m.updateSuite(ctx, suite, itemMap)
-		if err != nil {
-			return err
-		}
+	// extract file information from indices
+	itemMap := make(map[string]*apt.FileInfo)
+	if err := m.extractItems(ctx, suites, itemMap); err != nil {
+		return errors.Wrap(err, m.id)
 	}
 
 	// download all files matching the configuration.
@@ -306,15 +372,15 @@ func (m *Mirror) Update(ctx context.Context) error {
 	return nil
 }
 
-// updateSuite partially updates mirror for a suite.
-func (m *Mirror) updateSuite(ctx context.Context, suite string, itemMap map[string]*apt.FileInfo) error {
+// updateSuite downloads (or reuses) release files and indices of a suite.
+func (m *Mirror) updateSuite(ctx context.Context, suite string) (*suiteIndices, error) {
 	log.Info("download Release/InRelease", map[string]interface{}{
 		"repo":  m.id,
 		"suite": suite,
 	})
 	indexMap, byhash, err := m.downloadRelease(ctx, suite)
 	if err != nil {
-		return errors.Wrap(err, m.id)
+		return nil, errors.Wrap(err, m.id)
 	}
 
 	if byhash {
@@ -325,7 +391,7 @@ func (m *Mirror) updateSuite(ctx context.Context, suite string, itemMap map[stri
 	}
 
 	if len(indexMap) == 0 {
-		return errors.New(m.id + ": found no Release/InRelease")
+		return nil, errors.New(m.id + ": found no Release/InRelease")
 	}
 
 	// WORKAROUND: some (zabbix) repositories returns wrong contents
@@ -347,20 +413,14 @@ func (m *Mirror) updateSuite(ctx context.Context, suite string, itemMap map[stri
 	// download (or reuse) all indices
 	indices, err := m.downloadIndices(ctx, indexMap, byhash)
 	if err != nil {
-		return errors.Wrap(err, m.id)
+		return nil, errors.Wrap(err, m.id)
 	}
 
 	err = m.checkIndices(indexMap, indices)
 	if err != nil {
-		return errors.Wrap(err, m.id)
+		return nil, errors.Wrap(err, m.id)
 	}
-
-	// extract file information from indices
-	err = m.extractItems(indices, indexMap, itemMap, byhash)
-	if err != nil {
-		return errors.Wrap(err, m.id)
-	}
-	return nil
+	return &suiteIndices{indexMap: indexMap, indices: indices, byhash: byhash}, nil
 }
 
 type dlResult struct {

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+- [mirror] Downloads of release files kept running after an update
+  failed, e.g. for inconsistent Release and InRelease, and left
+  temporary files in the working directory, which could make removing
+  the directory fail.  They are now stopped and their files removed.
 
 ## [1.5.2] - 2026-10-02
 ### Changed

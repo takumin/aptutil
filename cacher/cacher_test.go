@@ -197,20 +197,33 @@ func TestCacherResultInvalidation(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestCacher(t, srv.URL)
-	c.cachePeriod = 300 * time.Millisecond
+	// results are expired by expireResult below instead of timers so
+	// that the test does not depend on delays in scheduling.
+	c.cachePeriod = time.Hour
 
 	const p = "ubuntu/pool/a.deb"
+	result := func() *dlStatus {
+		c.dlLock.Lock()
+		defer c.dlLock.Unlock()
+		return c.results[p]
+	}
+
 	<-c.Download(p, nil)
-	time.Sleep(150 * time.Millisecond)
+	first := result()
 	<-c.Download(p, nil)
+	second := result()
+	if first == nil || second == nil || first == second {
+		t.Fatalf("results = %p, %p, want two different results", first, second)
+	}
 
 	// the result of the first download expires, but the second does not.
-	time.Sleep(200 * time.Millisecond)
-	c.dlLock.Lock()
-	_, ok := c.results[p]
-	c.dlLock.Unlock()
-	if !ok {
+	c.expireResult(p, first)
+	if result() != second {
 		t.Error("the result of the newer download was invalidated")
+	}
+	c.expireResult(p, second)
+	if r := result(); r != nil {
+		t.Errorf("the result was not invalidated: %v", r)
 	}
 }
 

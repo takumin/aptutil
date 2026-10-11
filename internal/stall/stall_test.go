@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -28,21 +29,25 @@ func TestWatchStalled(t *testing.T) {
 func TestWatchProgress(t *testing.T) {
 	t.Parallel()
 
-	ctx, w := Watch(context.Background(), 100*time.Millisecond)
-	defer w.Stop()
+	// use the fake clock so that delays in scheduling do not make
+	// the reads look stalled.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, w := Watch(context.Background(), 100*time.Millisecond)
+		defer w.Stop()
 
-	// reading keeps postponing the timeout beyond its duration.
-	r := w.Wrap(io.NopCloser(strings.NewReader("abcde")))
-	buf := make([]byte, 1)
-	for range 5 {
-		time.Sleep(40 * time.Millisecond)
-		if _, err := r.Read(buf); err != nil {
-			t.Fatal(err)
+		// reading keeps postponing the timeout beyond its duration.
+		r := w.Wrap(io.NopCloser(strings.NewReader("abcde")))
+		buf := make([]byte, 1)
+		for range 5 {
+			time.Sleep(40 * time.Millisecond)
+			if _, err := r.Read(buf); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		t.Errorf("context is canceled while making progress: %v", err)
-	}
+		if err := ctx.Err(); err != nil {
+			t.Errorf("context is canceled while making progress: %v", err)
+		}
+	})
 }
 
 func TestErrorCanceled(t *testing.T) {

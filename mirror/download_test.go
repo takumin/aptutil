@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -213,19 +215,20 @@ func TestMirrorDownloadSlowButProgressing(t *testing.T) {
 	var reqs atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqs.Add(1)
-		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Content-Length", "8")
 		// the whole body takes longer than stallTimeout, but each
-		// chunk arrives within it.
-		for _, b := range []byte("data") {
+		// chunk arrives well within it so that delays in scheduling
+		// do not make it look stalled.
+		for _, b := range []byte("datadata") {
 			_, _ = w.Write([]byte{b})
 			w.(http.Flusher).Flush()
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}))
 	defer srv.Close()
 
 	m := newTestMirror(t, srv.URL)
-	m.stallTimeout = 150 * time.Millisecond
+	m.stallTimeout = 500 * time.Millisecond
 	ch := make(chan *dlResult, 1)
 	m.download(context.Background(), "a", nil, false, ch)
 	r := <-ch
@@ -236,8 +239,8 @@ func TestMirrorDownloadSlowButProgressing(t *testing.T) {
 	if r.err != nil {
 		t.Fatal(r.err)
 	}
-	if r.fi.Size() != 4 {
-		t.Errorf("size = %d, want 4", r.fi.Size())
+	if r.fi.Size() != 8 {
+		t.Errorf("size = %d, want 8", r.fi.Size())
 	}
 	if n := reqs.Load(); n != 1 {
 		t.Errorf("requests = %d, want 1", n)
@@ -301,5 +304,65 @@ func TestMirrorDownloadLocalErrorNotRetried(t *testing.T) {
 	}
 	if n := reqs.Load(); n != 1 {
 		t.Errorf("requests = %d, want 1", n)
+	}
+}
+
+func TestMirrorDownloadReleaseWaitsForDownloads(t *testing.T) {
+	t.Parallel()
+
+	files := flatRepo(map[string]string{"a.deb": "a"})
+	// InRelease of the next generation listing b.deb.
+	next := flatRepo(map[string]string{"a.deb": "a", "b.deb": "b"})
+	files["InRelease"] = next["Release"]
+
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "Release.gpg" {
+			// respond after downloadRelease fails for the
+			// inconsistent Release and InRelease.
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		data, ok := files[p]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(data))
+	}))
+	defer srv.Close()
+
+	m := newTestMirror(t, srv.URL)
+	const slots = 8
+	m.semaphore = make(chan struct{}, slots)
+	for range slots {
+		m.semaphore <- struct{}{}
+	}
+
+	_, _, err := m.downloadRelease(context.Background(), "/")
+	if err == nil {
+		t.Error("downloadRelease must fail")
+	}
+	close(release)
+
+	// a download left running would save Release.gpg in a temporary
+	// file that nobody removes.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(m.semaphore) < slots {
+		if time.Now().After(deadline) {
+			t.Fatal("downloads did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	l, err := filepath.Glob(filepath.Join(m.storage.dir, "_tmp*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l) != 0 {
+		t.Errorf("temporary files are left: %v", l)
 	}
 }

@@ -1,24 +1,50 @@
 package mirror
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestFlock(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.Command("flock", "t/mirror.toml", "sleep", "0.2")
-	err := cmd.Start()
+	p := filepath.Join(t.TempDir(), "lock")
+	if err := os.WriteFile(p, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// the child tells that it has acquired the lock by writing a line,
+	// and holds the lock until its stdin is closed, so that the test
+	// does not depend on how long it takes to start.
+	cmd := exec.Command("flock", p, "sh", "-c", "echo locked; cat >/dev/null") //nolint:gosec // G204: p is a temporary file of the test
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = cmd.Start()
 	if err != nil {
 		t.Skip()
 		return
 	}
-	time.Sleep(100 * time.Millisecond)
+	waited := false
+	defer func() {
+		_ = stdin.Close()
+		if !waited {
+			_ = cmd.Wait()
+		}
+	}()
+	if _, err := bufio.NewReader(stdout).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
 
-	f, err := os.Open("t/mirror.toml")
+	f, err := os.Open(p) //nolint:gosec // G304: p is a temporary file of the test
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +57,11 @@ func TestFlock(t *testing.T) {
 		t.Log(err)
 	}
 
-	_ = cmd.Wait()
+	_ = stdin.Close()
+	waited = true
+	if err = cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
 	if err = fl.Lock(); err != nil {
 		t.Fatal(err)
 	}

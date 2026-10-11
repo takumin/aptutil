@@ -437,6 +437,17 @@ func (c *Cacher) startDownload(p, dest string, valid *apt.FileInfo) *dlTask {
 	return t
 }
 
+// expireResult removes status, the result of a download of p, unless
+// it has been replaced by the result of a newer download.
+func (c *Cacher) expireResult(p string, status *dlStatus) {
+	c.dlLock.Lock()
+	defer c.dlLock.Unlock()
+
+	if c.results[p] == status {
+		delete(c.results, p)
+	}
+}
+
 // releaseTask releases t, and removes its uncached file if t is
 // no longer held by anyone.
 func (c *Cacher) releaseTask(t *dlTask) {
@@ -490,12 +501,7 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 				return nil
 			case <-time.After(c.cachePeriod):
 			}
-			c.dlLock.Lock()
-			// keep the result of a newer download.
-			if c.results[p] == status {
-				delete(c.results, p)
-			}
-			c.dlLock.Unlock()
+			c.expireResult(p, status)
 			return nil
 		})
 	}()

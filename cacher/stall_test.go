@@ -84,19 +84,20 @@ func TestCacherGetSlowButProgressing(t *testing.T) {
 	var reqs atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqs.Add(1)
-		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Content-Length", "8")
 		// the whole body takes longer than stallTimeout, but each
-		// chunk arrives within it.
-		for _, b := range []byte("data") {
+		// chunk arrives well within it so that delays in scheduling
+		// do not make it look stalled.
+		for _, b := range []byte("datadata") {
 			_, _ = w.Write([]byte{b})
 			w.(http.Flusher).Flush()
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}))
 	defer srv.Close()
 
 	c := newTestCacher(t, srv.URL)
-	c.stallTimeout = 150 * time.Millisecond
+	c.stallTimeout = 500 * time.Millisecond
 
 	status, f, err := c.Get(context.Background(), "ubuntu/pool/a.deb")
 	if err != nil {
@@ -110,8 +111,8 @@ func TestCacherGetSlowButProgressing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "data" {
-		t.Errorf("data = %q, want %q", data, "data")
+	if string(data) != "datadata" {
+		t.Errorf("data = %q, want %q", data, "datadata")
 	}
 	if n := reqs.Load(); n != 1 {
 		t.Errorf("requests = %d, want 1", n)

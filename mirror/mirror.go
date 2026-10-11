@@ -716,12 +716,27 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	releases := m.mc.ReleaseFiles(suite)
 	results := make(chan *dlResult, len(releases))
 
+	// on return, stop and wait for the downloads not received yet so
+	// that they do not write files after this returns, and remove
+	// their temporary files.
+	ctx, cancel := context.WithCancel(ctx)
+	var started, received int
+	defer func() {
+		cancel()
+		for ; received < started; received++ {
+			if r := <-results; r.tempfile != nil {
+				closeAndRemoveFile(r.tempfile)
+			}
+		}
+	}()
+
 	for _, p := range releases {
 		if err := m.acquireSemaphore(ctx); err != nil {
 			return nil, false, err
 		}
 
 		go m.download(ctx, p, nil, false, results)
+		started++
 	}
 
 	byhash := true
@@ -730,6 +745,7 @@ func (m *Mirror) downloadRelease(ctx context.Context, suite string) (map[string]
 	filMap := make(map[string]*apt.FileInfo)
 	for i := 0; i < len(releases); i++ {
 		rf, err := m.handleReleaseResults(results)
+		received++
 		if err != nil {
 			return nil, false, err
 		}
@@ -843,6 +859,13 @@ func (m *Mirror) downloadFiles(ctx context.Context,
 	})
 	env.Stop()
 	err := env.Wait()
+	// remove temporary files of the results left by recvResult failed.
+	// results is closed after all downloads finish.  See reuseOrDownload.
+	for r := range results {
+		if r.tempfile != nil {
+			closeAndRemoveFile(r.tempfile)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

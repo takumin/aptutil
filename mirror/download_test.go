@@ -215,19 +215,20 @@ func TestMirrorDownloadSlowButProgressing(t *testing.T) {
 	var reqs atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqs.Add(1)
-		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Content-Length", "8")
 		// the whole body takes longer than stallTimeout, but each
-		// chunk arrives within it.
-		for _, b := range []byte("data") {
+		// chunk arrives well within it so that delays in scheduling
+		// do not make it look stalled.
+		for _, b := range []byte("datadata") {
 			_, _ = w.Write([]byte{b})
 			w.(http.Flusher).Flush()
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}))
 	defer srv.Close()
 
 	m := newTestMirror(t, srv.URL)
-	m.stallTimeout = 150 * time.Millisecond
+	m.stallTimeout = 500 * time.Millisecond
 	ch := make(chan *dlResult, 1)
 	m.download(context.Background(), "a", nil, false, ch)
 	r := <-ch
@@ -238,8 +239,8 @@ func TestMirrorDownloadSlowButProgressing(t *testing.T) {
 	if r.err != nil {
 		t.Fatal(r.err)
 	}
-	if r.fi.Size() != 4 {
-		t.Errorf("size = %d, want 4", r.fi.Size())
+	if r.fi.Size() != 8 {
+		t.Errorf("size = %d, want 8", r.fi.Size())
 	}
 	if n := reqs.Load(); n != 1 {
 		t.Errorf("requests = %d, want 1", n)

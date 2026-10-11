@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [1.5.3] - 2026-10-11
+### Changed
+- Require Go 1.27.2 or later, and update dependencies.
+
 ### Fixed
 - [mirror] Downloads of release files kept running after an update
   failed, e.g. for inconsistent Release and InRelease, and left
@@ -221,7 +226,8 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/takumin/aptutil/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/takumin/aptutil/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/takumin/aptutil/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/takumin/aptutil/compare/v1.4.3...v1.5.0

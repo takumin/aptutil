@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] An item loaded at startup that was evicted while its
+  checksums were calculated was answered with 500 instead of being
+  downloaded again.
 - [cacher] When a Release file was updated while downloading an index
   listed in it, the index was validated only against the checksums in
   the previous Release, and failed with 502 even if it matched the

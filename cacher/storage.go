@@ -60,6 +60,10 @@ type Storage struct {
 	cache  map[string]*entry
 	lru    []*entry // for container/heap
 	lclock uint64   // ditto
+
+	// calcChecksum calculates checksums of an item without them.
+	// It is replaced in tests.
+	calcChecksum func(filename, p string) (*apt.FileInfo, error)
 }
 
 // NewStorage creates a Storage.
@@ -78,9 +82,10 @@ func NewStorage(dir string, capacity uint64) (*Storage, error) {
 	}
 
 	return &Storage{
-		dir:      dir,
-		cache:    make(map[string]*entry),
-		capacity: capacity,
+		dir:          dir,
+		cache:        make(map[string]*entry),
+		capacity:     capacity,
+		calcChecksum: calcChecksum,
 	}, nil
 }
 
@@ -322,15 +327,18 @@ func (cm *Storage) Lookup(fi *apt.FileInfo) (*os.File, error) {
 		// without holding cm.mu as it takes a while for large files.
 		filename := filepath.Join(cm.dir, e.FilePath())
 		cm.mu.Unlock()
-		fi2, err := calcChecksum(filename, p)
+		fi2, err := cm.calcChecksum(filename, p)
 		cm.mu.Lock()
+
+		// The item may have been replaced or removed meanwhile,
+		// making the file fail to read.  If so, look it up again.
+		if cm.cache[p] != e {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-
-		// The item may have been replaced or removed meanwhile.
-		// If so, look it up again.
-		if cm.cache[p] == e && !e.HasChecksum() {
+		if !e.HasChecksum() {
 			cm.used = cm.used - e.Size() + fi2.Size()
 			e.FileInfo = fi2
 		}

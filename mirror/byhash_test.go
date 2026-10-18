@@ -245,3 +245,32 @@ func TestMirrorIndicesToScan(t *testing.T) {
 		t.Errorf("indicesToScan = %v, want %v", got, want)
 	}
 }
+
+func TestMirrorByHashSHA512(t *testing.T) {
+	t.Parallel()
+
+	packages := "Package: a\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n"
+	fi, err := apt.CopyWithFileInfo(io.Discard, strings.NewReader(packages), "Packages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := fmt.Sprintf("Acquire-By-Hash: yes\nSHA256:\n %s %d Packages\nSHA512:\n %s %d Packages\n",
+		path.Base(fi.SHA256Path()), len(packages), path.Base(fi.SHA512Path()), len(packages))
+	files := map[string]string{
+		"Release":     release,
+		"Release.gpg": "dummy",
+		"Packages":    packages,
+		"a.deb":       "a",
+	}
+
+	dir, err := updateOnce(t, files, []string{"/"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// apt retrieves indices by the strongest hash listed in Release.
+	for _, p := range []string{fi.SHA512Path(), fi.SHA256Path()} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Error(err)
+		}
+	}
+}

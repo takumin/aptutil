@@ -2,6 +2,7 @@ package mirror
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -178,7 +179,7 @@ func (s *Storage) StoreLink(fi *apt.FileInfo, fullpath string) error {
 // Paths for checksums that fi does not have are omitted.
 func byHashPaths(fi *apt.FileInfo) []string {
 	var l []string
-	for _, p := range []string{fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
+	for _, p := range []string{fi.SHA512Path(), fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
 		if p != "" {
 			l = append(l, p)
 		}
@@ -251,7 +252,13 @@ func (s *Storage) Lookup(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, string) 
 		s.mu.RLock()
 		fi2, ok := s.info[p]
 		s.mu.RUnlock()
-		if !ok || !fi.Same(fi2) {
+		if !ok {
+			return nil, ""
+		}
+		// info.json written by older versions has no SHA512, so
+		// calculate it to reuse the file instead of downloading it.
+		lacksSHA512 := fi.SHA512Path() != "" && fi2.SHA512Path() == ""
+		if !lacksSHA512 && !fi.Same(fi2) {
 			return nil, ""
 		}
 
@@ -259,6 +266,12 @@ func (s *Storage) Lookup(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, string) 
 		st, err := os.Lstat(fullpath)
 		if err != nil || !st.Mode().IsRegular() || uint64(st.Size()) != fi2.Size() { //nolint:gosec // G115: regular file sizes are non-negative
 			return nil, ""
+		}
+		if lacksSHA512 {
+			fi2, err = calcFileInfo(fullpath, fi2.Path())
+			if err != nil || !fi.Same(fi2) {
+				return nil, ""
+			}
 		}
 		return fi2, fullpath
 	}
@@ -271,6 +284,16 @@ func (s *Storage) Lookup(fi *apt.FileInfo, byhash bool) (*apt.FileInfo, string) 
 	}
 
 	return f(fi.Path())
+}
+
+// calcFileInfo calculates FileInfo of the file at fullpath stored at p.
+func calcFileInfo(fullpath, p string) (*apt.FileInfo, error) {
+	f, err := os.Open(fullpath) //nolint:gosec // G304: fullpath is a file in the mirror directory
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return apt.CopyWithFileInfo(io.Discard, f, p)
 }
 
 // Open opens the named file and returns it.

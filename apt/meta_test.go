@@ -1,9 +1,13 @@
 package apt
 
 import (
+	"bytes"
+	"crypto/sha512"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
+	"path"
 	"strings"
 	"testing"
 )
@@ -724,14 +728,9 @@ func TestExtractFileInfoNoChecksum(t *testing.T) {
 		data string
 	}{
 		{
-			name: "Release",
-			p:    "ubuntu/dists/testing/Release",
-			data: "Origin: test\nSHA512:\n 0123 3 main/binary-amd64/Packages\n",
-		},
-		{
 			name: "Packages",
 			p:    "ubuntu/dists/testing/main/binary-amd64/Packages",
-			data: "Package: a\nFilename: pool/a.deb\nSize: 1\nSHA512: 0123\n",
+			data: "Package: a\nFilename: pool/a.deb\nSize: 1\nSHA384: 0123\n",
 		},
 	}
 
@@ -742,6 +741,72 @@ func TestExtractFileInfoNoChecksum(t *testing.T) {
 			_, _, err := ExtractFileInfo(tc.p, strings.NewReader(tc.data))
 			if err == nil {
 				t.Error("ExtractFileInfo must fail without supported checksums")
+			}
+		})
+	}
+}
+
+func TestExtractFileInfoSHA512(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("a")
+	sum := sha512.Sum512(data)
+	sha512Hex := hex.EncodeToString(sum[:])
+
+	testCases := []struct {
+		name string
+		p    string
+		data string
+		want string
+	}{
+		{
+			name: "Release",
+			p:    "ubuntu/dists/testing/Release",
+			data: "SHA512:\n " + sha512Hex + " 1 main/binary-amd64/Packages\n",
+			want: "ubuntu/dists/testing/main/binary-amd64/Packages",
+		},
+		{
+			name: "Packages",
+			p:    "ubuntu/dists/testing/main/binary-amd64/Packages",
+			data: "Package: a\nFilename: pool/a.deb\nSize: 1\nSHA512: " + sha512Hex + "\n",
+			want: "pool/a.deb",
+		},
+		{
+			name: "Sources",
+			p:    "ubuntu/dists/testing/main/source/Sources",
+			data: "Package: a\nDirectory: pool/a\nChecksums-Sha512:\n " + sha512Hex + " 1 a.dsc\n",
+			want: "pool/a/a.dsc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fil, _, err := ExtractFileInfo(tc.p, strings.NewReader(tc.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fil) != 1 {
+				t.Fatalf("ExtractFileInfo listed %d files, want 1", len(fil))
+			}
+
+			fi, err := CopyWithFileInfo(io.Discard, bytes.NewReader(data), tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !fil[0].Same(fi) {
+				t.Errorf("listed %v, want the same as %v", fil[0], fi)
+			}
+			bad, err := CopyWithFileInfo(io.Discard, strings.NewReader("b"), tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fil[0].Same(bad) {
+				t.Error("SHA512 is not compared")
+			}
+			if want := path.Dir(tc.want) + "/by-hash/SHA512/" + sha512Hex; fil[0].SHA512Path() != want {
+				t.Errorf("SHA512Path() = %q, want %q", fil[0].SHA512Path(), want)
 			}
 		})
 	}

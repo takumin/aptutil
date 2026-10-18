@@ -156,12 +156,14 @@ func TestCacherUpdateListedAliases(t *testing.T) {
 	}
 
 	c.updateListed(release, []*apt.FileInfo{oldFI}, byHashAliases([]*apt.FileInfo{oldFI}))
-	if fi := c.aliases[oldFI.SHA256Path()]; fi != oldFI {
-		t.Fatalf("aliases[%s] = %v, want %v", oldFI.SHA256Path(), fi, oldFI)
+	for _, hp := range []string{oldFI.SHA512Path(), oldFI.SHA256Path()} {
+		if fi := c.aliases[hp]; fi != oldFI {
+			t.Fatalf("aliases[%s] = %v, want %v", hp, fi, oldFI)
+		}
 	}
 
 	c.updateListed(release, []*apt.FileInfo{newFI}, byHashAliases([]*apt.FileInfo{newFI}))
-	for _, hp := range []string{oldFI.SHA256Path(), oldFI.SHA1Path(), oldFI.MD5SumPath()} {
+	for _, hp := range []string{oldFI.SHA512Path(), oldFI.SHA256Path(), oldFI.SHA1Path(), oldFI.MD5SumPath()} {
 		if _, ok := c.aliases[hp]; ok {
 			t.Errorf("%s should be removed", hp)
 		}

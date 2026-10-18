@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+- SHA512 in Release, Packages and Sources is now used to validate files,
+  and the mirror creates `by-hash/SHA512` and the cacher serves it.
+  Before, indices and items listed only with SHA512 were taken as
+  listing nothing or having no checksum, and apt requesting
+  `by-hash/SHA512` of a mirror, as it does for the strongest hash in
+  Release, got 404.  Files mirrored by older versions are checked
+  against SHA512 by reading them once, instead of downloading them
+  again.
+
 ### Fixed
 - [cacher] At startup, stale meta data cached, such as i18n/Index not
   downloaded again after Release was updated, or Release older than
@@ -68,10 +78,8 @@ All notable changes to this project will be documented in this file.
 - [cacher] A negative `check_interval` was accepted, and the cacher
   panicked when it started checking updates of Release files.  It is
   now rejected as invalid.
-- Packages listing an item without MD5sum, SHA1 nor SHA256 were
-  accepted, and the item was validated only by its size.  Release files
-  listing indices only with SHA512 were accepted as listing no indices,
-  and the mirror published the suite without them.  They are now
+- Packages listing an item without any supported checksum were
+  accepted, and the item was validated only by its size.  They are now
   rejected as invalid, as Sources are.
 - [mirror] A mirror could be published with files whose write-back
   failed, when syncfs(2) reported the error to another mirror in the

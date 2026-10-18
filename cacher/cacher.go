@@ -52,7 +52,7 @@ func byHashAliases(fil []*apt.FileInfo) map[string]*apt.FileInfo {
 		if apt.IsMeta(fi.Path()) && !apt.IsSupported(fi.Path()) {
 			continue
 		}
-		for _, hp := range []string{fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
+		for _, hp := range []string{fi.SHA512Path(), fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
 			if hp != "" {
 				m[hp] = fi
 			}

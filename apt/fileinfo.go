@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"hash"
@@ -22,6 +23,7 @@ type FileInfo struct {
 	md5sum    []byte // nil means no MD5 checksum to be checked.
 	sha1sum   []byte // nil means no SHA1 ...
 	sha256sum []byte // nil means no SHA256 ...
+	sha512sum []byte // nil means no SHA512 ...
 }
 
 // Same returns true if t has the same checksum values.
@@ -44,6 +46,9 @@ func (fi *FileInfo) Same(t *FileInfo) bool {
 	if fi.sha256sum != nil && !bytes.Equal(fi.sha256sum, t.sha256sum) {
 		return false
 	}
+	if fi.sha512sum != nil && !bytes.Equal(fi.sha512sum, t.sha512sum) {
+		return false
+	}
 	return true
 }
 
@@ -59,7 +64,8 @@ func (fi *FileInfo) Conflicts(t *FileInfo) bool {
 	}
 	return differ(fi.md5sum, t.md5sum) ||
 		differ(fi.sha1sum, t.sha1sum) ||
-		differ(fi.sha256sum, t.sha256sum)
+		differ(fi.sha256sum, t.sha256sum) ||
+		differ(fi.sha512sum, t.sha512sum)
 }
 
 // Path returns the indentifying path string of the file.
@@ -77,15 +83,22 @@ func (fi *FileInfo) HasChecksum() bool {
 	return fi.md5sum != nil
 }
 
+// hasAnyChecksum returns true if fi has any checksum to validate data.
+func (fi *FileInfo) hasAnyChecksum() bool {
+	return fi.md5sum != nil || fi.sha1sum != nil || fi.sha256sum != nil || fi.sha512sum != nil
+}
+
 // CalcChecksums calculates checksums and stores them in fi.
 func (fi *FileInfo) CalcChecksums(data []byte) {
 	md5sum := md5.Sum(data)
 	sha1sum := sha1.Sum(data)
 	sha256sum := sha256.Sum256(data)
+	sha512sum := sha512.Sum512(data)
 	fi.size = uint64(len(data))
 	fi.md5sum = md5sum[:]
 	fi.sha1sum = sha1sum[:]
 	fi.sha256sum = sha256sum[:]
+	fi.sha512sum = sha512sum[:]
 }
 
 // AddPrefix creates a new FileInfo by prepending prefix to the path.
@@ -131,12 +144,26 @@ func (fi *FileInfo) SHA256Path() string {
 		hex.EncodeToString(fi.sha256sum))
 }
 
+// SHA512Path returns the filepath for "by-hash" with sha512 checksum.
+// If fi has no checksum, an empty string will be returned.
+func (fi *FileInfo) SHA512Path() string {
+	if fi.sha512sum == nil {
+		return ""
+	}
+	return path.Join(path.Dir(fi.path),
+		"by-hash",
+		"SHA512",
+		hex.EncodeToString(fi.sha512sum))
+}
+
 type fileInfoJSON struct {
 	Path      string
 	Size      int64
 	MD5Sum    string
 	SHA1Sum   string
 	SHA256Sum string
+	// SHA512Sum is missing in info.json written by older versions.
+	SHA512Sum string `json:",omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler
@@ -152,6 +179,9 @@ func (fi *FileInfo) MarshalJSON() ([]byte, error) {
 	}
 	if fi.sha256sum != nil {
 		fij.SHA256Sum = hex.EncodeToString(fi.sha256sum)
+	}
+	if fi.sha512sum != nil {
+		fij.SHA512Sum = hex.EncodeToString(fi.sha512sum)
 	}
 	return json.Marshal(&fij)
 }
@@ -176,9 +206,14 @@ func (fi *FileInfo) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
 	}
+	sha512sum, err := decodeChecksum(fij.SHA512Sum)
+	if err != nil {
+		return errors.Wrap(err, "UnmarshalJSON for "+fij.Path)
+	}
 	fi.md5sum = md5sum
 	fi.sha1sum = sha1sum
 	fi.sha256sum = sha256sum
+	fi.sha512sum = sha512sum
 	return nil
 }
 
@@ -193,8 +228,8 @@ func decodeChecksum(s string) ([]byte, error) {
 }
 
 // parallelHashWriter writes each chunk to hashes concurrently, so that
-// calculating them takes as long as the slowest one, MD5, instead of
-// the sum of them.
+// calculating them takes as long as the slowest one instead of the sum
+// of them.
 type parallelHashWriter []hash.Hash
 
 func (w parallelHashWriter) Write(p []byte) (int, error) {
@@ -213,8 +248,9 @@ func CopyWithFileInfo(dst io.Writer, src io.Reader, p string) (*FileInfo, error)
 	md5hash := md5.New()
 	sha1hash := sha1.New()
 	sha256hash := sha256.New()
+	sha512hash := sha512.New()
 
-	w := io.MultiWriter(parallelHashWriter{md5hash, sha1hash, sha256hash}, dst)
+	w := io.MultiWriter(parallelHashWriter{md5hash, sha1hash, sha256hash, sha512hash}, dst)
 	n, err := io.Copy(w, src)
 	if err != nil {
 		return nil, err
@@ -226,6 +262,7 @@ func CopyWithFileInfo(dst io.Writer, src io.Reader, p string) (*FileInfo, error)
 		md5sum:    md5hash.Sum(nil),
 		sha1sum:   sha1hash.Sum(nil),
 		sha256sum: sha256hash.Sum(nil),
+		sha512sum: sha512hash.Sum(nil),
 	}, nil
 }
 

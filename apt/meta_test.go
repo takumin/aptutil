@@ -849,3 +849,73 @@ func TestExtractFileInfoListingNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractFileInfoCaseInsensitiveFields(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("a")
+	fi, err := CopyWithFileInfo(io.Discard, bytes.NewReader(data), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md5Hex := hex.EncodeToString(fi.md5sum)
+
+	testCases := []struct {
+		name string
+		p    string
+		data string
+		want string
+	}{
+		{
+			name: "Release",
+			p:    "ubuntu/dists/testing/Release",
+			data: "md5sum:\n " + md5Hex + " 1 main/binary-amd64/Packages\n",
+			want: "ubuntu/dists/testing/main/binary-amd64/Packages",
+		},
+		{
+			name: "Packages",
+			p:    "ubuntu/dists/testing/main/binary-amd64/Packages",
+			data: "Package: a\nfilename: pool/a.deb\nSIZE: 1\nMD5Sum: " + md5Hex + "\n",
+			want: "pool/a.deb",
+		},
+		{
+			name: "Sources",
+			p:    "ubuntu/dists/testing/main/source/Sources",
+			data: "Package: a\ndirectory: pool/a\nfiles:\n " + md5Hex + " 1 a.dsc\n",
+			want: "pool/a/a.dsc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fil, _, err := ExtractFileInfo(tc.p, strings.NewReader(tc.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fil) != 1 {
+				t.Fatalf("ExtractFileInfo listed %d files, want 1", len(fil))
+			}
+
+			want, err := CopyWithFileInfo(io.Discard, bytes.NewReader(data), tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !fil[0].Same(want) {
+				t.Errorf("listed %v, want the same as %v", fil[0], want)
+			}
+			if !fil[0].HasChecksum() {
+				t.Error("MD5 checksum is not parsed")
+			}
+		})
+	}
+}
+
+func TestSupportByHashCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	if !SupportByHash(Paragraph{"acquire-by-hash": {"yes"}}) {
+		t.Error("acquire-by-hash is not recognized")
+	}
+}

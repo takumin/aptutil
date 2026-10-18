@@ -67,6 +67,27 @@ func IsSafePath(p string) bool {
 	return err == nil
 }
 
+// field returns the values of the field name in d.  Field names are
+// case-insensitive as Debian policy 5.1 says, so that e.g. "MD5Sum" is
+// found for "MD5sum".
+func field(d Paragraph, name string) ([]string, bool) {
+	if v, ok := d[name]; ok {
+		return v, true
+	}
+	for k, v := range d {
+		if strings.EqualFold(k, name) {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// values returns the values of the field name in d, or nil if missing.
+func values(d Paragraph, name string) []string {
+	v, _ := field(d, name)
+	return v
+}
+
 // IsMeta returns true if p points a debian repository index file
 // containing checksums for other files.
 func IsMeta(p string) bool {
@@ -110,7 +131,7 @@ func IsSupported(p string) bool {
 // support for indices acquisition via hash values (by-hash).
 // See https://wiki.debian.org/DebianRepository/Format#indices_acquisition_via_hashsums_.28by-hash.29
 func SupportByHash(d Paragraph) bool {
-	p := d["Acquire-By-Hash"]
+	p := values(d, "Acquire-By-Hash")
 	if len(p) != 1 {
 		return false
 	}
@@ -164,7 +185,7 @@ func getFilesFromRelease(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 	// files with these fields.
 	m := make(map[string]*FileInfo)
 	for _, f := range fields {
-		for _, l := range d[f.name] {
+		for _, l := range values(d, f.name) {
 			entryPath, size, csum, err := parseChecksum(l)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "parseChecksum for "+f.name)
@@ -215,7 +236,7 @@ func getFilesFromPackages(p string, r io.Reader) ([]*FileInfo, Paragraph, error)
 			return nil, nil, errors.Wrap(err, "parser.Read")
 		}
 
-		filename, ok := d["Filename"]
+		filename, ok := field(d, "Filename")
 		if !ok {
 			return nil, nil, errors.New("no Filename in " + p)
 		}
@@ -224,7 +245,7 @@ func getFilesFromPackages(p string, r io.Reader) ([]*FileInfo, Paragraph, error)
 			return nil, nil, errors.Wrap(err, "Filename in "+p+": "+filename[0])
 		}
 
-		strsize, ok := d["Size"]
+		strsize, ok := field(d, "Size")
 		if !ok {
 			return nil, nil, errors.New("no Size in " + p)
 		}
@@ -237,28 +258,28 @@ func getFilesFromPackages(p string, r io.Reader) ([]*FileInfo, Paragraph, error)
 			path: fpath,
 			size: size,
 		}
-		if csum, ok := d["MD5sum"]; ok {
+		if csum, ok := field(d, "MD5sum"); ok {
 			b, err := hex.DecodeString(csum[0])
 			if err != nil {
 				return nil, nil, err
 			}
 			fi.md5sum = b
 		}
-		if csum, ok := d["SHA1"]; ok {
+		if csum, ok := field(d, "SHA1"); ok {
 			b, err := hex.DecodeString(csum[0])
 			if err != nil {
 				return nil, nil, err
 			}
 			fi.sha1sum = b
 		}
-		if csum, ok := d["SHA256"]; ok {
+		if csum, ok := field(d, "SHA256"); ok {
 			b, err := hex.DecodeString(csum[0])
 			if err != nil {
 				return nil, nil, err
 			}
 			fi.sha256sum = b
 		}
-		if csum, ok := d["SHA512"]; ok {
+		if csum, ok := field(d, "SHA512"); ok {
 			b, err := hex.DecodeString(csum[0])
 			if err != nil {
 				return nil, nil, err
@@ -289,7 +310,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 			return nil, nil, errors.Wrap(err, "parser.Read")
 		}
 
-		dirs, ok := d["Directory"]
+		dirs, ok := field(d, "Directory")
 		if !ok {
 			return nil, nil, errors.New("no Directory in " + p)
 		}
@@ -300,7 +321,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 
 		m := make(map[string]*FileInfo)
 
-		for _, l := range d["Files"] {
+		for _, l := range values(d, "Files") {
 			fname, size, csum, err := parseChecksum(l)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "parseChecksum for Files")
@@ -318,7 +339,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 			}
 		}
 
-		for _, l := range d["Checksums-Sha1"] {
+		for _, l := range values(d, "Checksums-Sha1") {
 			fname, size, csum, err := parseChecksum(l)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "parseChecksum for Checksums-Sha1")
@@ -340,7 +361,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 			}
 		}
 
-		for _, l := range d["Checksums-Sha256"] {
+		for _, l := range values(d, "Checksums-Sha256") {
 			fname, size, csum, err := parseChecksum(l)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "parseChecksum for Checksums-Sha256")
@@ -362,7 +383,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 			}
 		}
 
-		for _, l := range d["Checksums-Sha512"] {
+		for _, l := range values(d, "Checksums-Sha512") {
 			fname, size, csum, err := parseChecksum(l)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "parseChecksum for Checksums-Sha512")

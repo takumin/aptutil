@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
   again.
 
 ### Fixed
+- Field names in Release, Packages and Sources were case-sensitive,
+  and e.g. a Packages file listing checksums only with `MD5Sum` instead
+  of `MD5sum` was rejected for having no checksum.  They are now
+  case-insensitive as Debian policy says.
 - [mirror] A section matched the indices of another section whose name
   ends with it; e.g. `free` matched `non-free`.  A section now matches
   only at a directory boundary.

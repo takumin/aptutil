@@ -265,7 +265,14 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 	}
 	fil, d, err := apt.ExtractFileInfo(t[1], f)
 	if err != nil {
-		return parsedMeta{}, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
+		// Download accepts broken meta data as is, so they may be
+		// stored.  Serve them as they are listing no items instead of
+		// failing to start until they are removed by hand.
+		log.Error("invalid meta data", map[string]interface{}{
+			"path":  fi.Path(),
+			"error": err.Error(),
+		})
+		return parsedMeta{}, nil
 	}
 	fil = addPrefix(t[0], fil)
 	var aliases map[string]*apt.FileInfo

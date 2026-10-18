@@ -443,3 +443,39 @@ func TestCacherGetUnlisted(t *testing.T) {
 		t.Errorf("upstream hits after restart = %d, want 1", n)
 	}
 }
+
+func TestCacherRestartWithBrokenMeta(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	const p = "dists/stable/InRelease"
+	tr.set(p, []byte("<!DOCTYPE html>\n<html></html>\n"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	// broken meta data are accepted and cached as is.
+	if status, _ := getData(t, c, "ubuntu/"+p); status != http.StatusOK {
+		t.Fatalf("Get = %d", status)
+	}
+
+	// the cacher starts even with the broken meta data, and serves them.
+	c2, err := NewCacher(&Config{
+		CheckInterval:  defaultCheckInterval,
+		CachePeriod:    defaultCachePeriod,
+		MetaDirectory:  c.meta.dir,
+		CacheDirectory: c.items.dir,
+		CacheCapacity:  defaultCacheCapacity,
+		Mapping:        map[string]string{"ubuntu": srv.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := getData(t, c2, "ubuntu/"+p); status != http.StatusOK {
+		t.Fatalf("Get after restart = %d", status)
+	}
+	if n := tr.hits(p); n != 1 {
+		t.Errorf("upstream hits = %d, want 1", n)
+	}
+}

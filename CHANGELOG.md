@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+- [cacher] The cacher failed to start once it had cached broken meta
+  data, such as an HTML page served for InRelease by a captive portal,
+  until they were removed by hand.  They are now served as they are
+  listing no items, as they are after downloading.
 
 ## [1.5.3] - 2026-10-11
 ### Changed

@@ -217,3 +217,36 @@ func TestMirrorConfigNoURL(t *testing.T) {
 		t.Error("Check must fail without url")
 	}
 }
+
+func TestMatchingIndexSectionBoundary(t *testing.T) {
+	t.Parallel()
+
+	var mc MirrConfig
+	_, err := toml.Decode(`
+url = "http://example.com/debian"
+suites = ["stable"]
+sections = ["free"]
+architectures = ["amd64"]
+mirror_source = true
+`, &mc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		p    string
+		want bool
+	}{
+		{"dists/stable/free/binary-amd64/Packages.gz", true},
+		{"dists/stable/free/source/Sources.xz", true},
+		{"dists/stable/updates/free/binary-amd64/Packages", true},
+		{"free/binary-amd64/Packages", true},
+		{"dists/stable/non-free/binary-amd64/Packages.gz", false},
+		{"dists/stable/non-free/source/Sources.xz", false},
+	}
+	for _, tc := range testCases {
+		if got := mc.MatchingIndex(tc.p); got != tc.want {
+			t.Errorf("MatchingIndex(%q) = %v, want %v", tc.p, got, tc.want)
+		}
+	}
+}

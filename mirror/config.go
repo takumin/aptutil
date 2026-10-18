@@ -69,7 +69,7 @@ func (mc *MirrConfig) Check() error {
 		return errors.New("flat repository cannot have sections")
 	}
 	if flat && len(mc.Architectures) != 0 {
-		return errors.New("flat repository cannot have sections")
+		return errors.New("flat repository cannot have architectures")
 	}
 	for _, suite := range mc.Suites[1:] {
 		if flat != isFlat(suite) {
@@ -110,6 +110,12 @@ func (mc *MirrConfig) Resolve(p string) *url.URL {
 	return mc.URL.ResolveReference(&url.URL{Path: p})
 }
 
+// hasPathSuffix returns true if p is suffix or ends with "/" + suffix,
+// so that a section does not match another whose name ends with it.
+func hasPathSuffix(p, suffix string) bool {
+	return p == suffix || strings.HasSuffix(p, "/"+suffix)
+}
+
 func rawName(p string) string {
 	base := path.Base(p)
 	ext := path.Ext(base)
@@ -142,13 +148,13 @@ func (mc *MirrConfig) MatchingIndex(p string) bool {
 	for _, section := range mc.Sections {
 		for _, arch := range archs {
 			t := path.Join(path.Clean(section), "binary-"+arch, "Packages")
-			if strings.HasSuffix(pNoExt, t) {
+			if hasPathSuffix(pNoExt, t) {
 				return true
 			}
 		}
 		if mc.Source {
 			t := path.Join(path.Clean(section), "source", "Sources")
-			if strings.HasSuffix(pNoExt, t) {
+			if hasPathSuffix(pNoExt, t) {
 				return true
 			}
 		}

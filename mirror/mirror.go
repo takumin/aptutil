@@ -74,7 +74,7 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		return nil, errors.New("max_conns must be >= 0")
 	}
 
-	var currentStorage *Storage
+	var currentStorage, storage *Storage
 	curdir, err := filepath.EvalSymlinks(filepath.Join(dir, id))
 	switch {
 	case os.IsNotExist(err):
@@ -87,17 +87,20 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		}
 		err = currentStorage.Load()
 		if err != nil {
+			_ = currentStorage.Close()
 			return nil, errors.Wrap(err, id)
 		}
 	}
 
 	d := filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
 	err = os.Mkdir(d, 0o755)
-	if err != nil {
-		return nil, errors.Wrap(err, id)
+	if err == nil {
+		storage, err = NewStorage(d, id)
 	}
-	storage, err := NewStorage(d, id)
 	if err != nil {
+		if currentStorage != nil {
+			_ = currentStorage.Close()
+		}
 		return nil, errors.Wrap(err, id)
 	}
 
@@ -322,7 +325,16 @@ func (m *Mirror) replaceLink() error {
 }
 
 // Update updates mirrored files.
+//
+// m cannot be used after Update returns.
 func (m *Mirror) Update(ctx context.Context) error {
+	defer func() {
+		_ = m.storage.Close()
+		if m.current != nil {
+			_ = m.current.Close()
+		}
+	}()
+
 	// download indices of suites concurrently.
 	suites := make([]*suiteIndices, len(m.mc.Suites))
 	env := well.NewEnvironment(ctx)

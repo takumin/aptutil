@@ -20,6 +20,7 @@ const (
 type Storage struct {
 	dir    string
 	prefix string
+	syncer *fsSyncer
 
 	mu   sync.RWMutex
 	info map[string]*apt.FileInfo
@@ -32,6 +33,10 @@ type Storage struct {
 //
 // dir must be an absolute path to an existing directory.
 // prefix should be a directory name.
+//
+// NewStorage must be called before files are stored so that Save can
+// detect errors in writing them back.  The returned Storage should be
+// closed by Close.
 func NewStorage(dir, prefix string) (*Storage, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, errors.New("none absolute: " + dir)
@@ -46,11 +51,22 @@ func NewStorage(dir, prefix string) (*Storage, error) {
 		return nil, errors.New("not a directory: " + dir)
 	}
 
+	syncer, err := newFSSyncer(dir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Storage{
 		dir:    dir,
 		prefix: prefix,
+		syncer: syncer,
 		info:   make(map[string]*apt.FileInfo),
 	}, nil
+}
+
+// Close releases resources of the Storage.
+func (s *Storage) Close() error {
+	return s.syncer.Close()
 }
 
 // Dir returns the directory of the Storage.
@@ -112,9 +128,9 @@ func (s *Storage) Save() error {
 
 	// files are not synced one by one when they are stored, so sync
 	// them all at once together with info.json and directories.
-	err = syncFS(s.dir)
+	err = s.syncer.Sync()
 	if err != nil {
-		return errors.Wrap(err, "syncFS(s.dir)")
+		return errors.Wrap(err, "syncer.Sync")
 	}
 
 	return nil

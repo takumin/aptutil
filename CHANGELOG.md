@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] A mirror could be published with files whose write-back
+  failed, when syncfs(2) reported the error to another mirror in the
+  same file system.  The mirror directory is now opened before files
+  are written so that syncfs(2) reports such errors to every mirror.
 - [mirror] A mirror without `url` made go-apt-mirror panic, stopping
   updates of the other mirrors.  It is now rejected as invalid.
 - [cacher] The cacher failed to start once it had cached broken meta

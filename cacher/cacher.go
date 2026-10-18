@@ -268,7 +268,11 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 
 	t := strings.SplitN(fi.Path(), "/", 2)
 	if len(t) != 2 {
-		panic("there should always be a prefix!")
+		// The cacher never stores meta data there, but someone else may.
+		log.Error("meta data without prefix", map[string]interface{}{
+			"path": fi.Path(),
+		})
+		return parsedMeta{}, nil
 	}
 	fil, d, err := apt.ExtractFileInfo(t[1], f)
 	if err != nil {

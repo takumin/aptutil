@@ -529,6 +529,23 @@ func TestCacherRestartWithBrokenMeta(t *testing.T) {
 	}
 }
 
+func TestCacherRestartWithMetaWithoutPrefix(t *testing.T) {
+	t.Parallel()
+
+	config := NewConfig()
+	config.MetaDirectory = t.TempDir()
+	config.CacheDirectory = t.TempDir()
+	config.Mapping = map[string]string{"ubuntu": "http://example.com"}
+	err := os.WriteFile(filepath.Join(config.MetaDirectory, "Release"+fileSuffix), []byte("SHA256:\n"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewCacher(config); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCacherGetLocalFailureStopsDownload(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] A file put directly in `meta_dir` by someone else made the
+  cacher panic at startup.  It is now ignored.
 - [cacher] `.` and `..` were accepted as prefixes in `mapping`, and
   items for `..` were stored outside `meta_dir` and `cache_dir`.  They
   are now rejected as invalid.

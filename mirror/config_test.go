@@ -204,3 +204,16 @@ func TestMirrorConfig(t *testing.T) {
 		t.Error(`mc.MatchingIndex("14.04/Sources")`)
 	}
 }
+
+func TestMirrorConfigNoURL(t *testing.T) {
+	t.Parallel()
+
+	var mc MirrConfig
+	_, err := toml.Decode(`suites = ["stable"]`, &mc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mc.Check(); err == nil {
+		t.Error("Check must fail without url")
+	}
+}

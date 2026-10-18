@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] A mirror without `url` made go-apt-mirror panic, stopping
+  updates of the other mirrors.  It is now rejected as invalid.
 - [cacher] The cacher failed to start once it had cached broken meta
   data, such as an HTML page served for InRelease by a captive portal,
   until they were removed by hand.  They are now served as they are

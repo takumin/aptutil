@@ -53,6 +53,8 @@ type Mirror struct {
 
 	// stallTimeout aborts a download that makes no progress for it.
 	stallTimeout time.Duration
+
+	closeOnce sync.Once
 }
 
 // NewMirror constructs a Mirror for given mirror id.
@@ -324,16 +326,23 @@ func (m *Mirror) replaceLink() error {
 	return DirSync(m.dir)
 }
 
-// Update updates mirrored files.
+// Close releases resources of m.  It may be called more than once.
 //
-// m cannot be used after Update returns.
-func (m *Mirror) Update(ctx context.Context) error {
-	defer func() {
+// m cannot be used after Close returns.
+func (m *Mirror) Close() {
+	m.closeOnce.Do(func() {
 		_ = m.storage.Close()
 		if m.current != nil {
 			_ = m.current.Close()
 		}
-	}()
+	})
+}
+
+// Update updates mirrored files, and closes m by Close.
+//
+// m cannot be used after Update returns.
+func (m *Mirror) Update(ctx context.Context) error {
+	defer m.Close()
 
 	// download indices of suites concurrently.
 	suites := make([]*suiteIndices, len(m.mc.Suites))

@@ -332,3 +332,54 @@ func TestCacherGetByHashStale(t *testing.T) {
 		t.Errorf("Lookup of the updated Packages = %v, want ErrNotFound", err)
 	}
 }
+
+// TestCacherGetByHashCurrentData tests that a by-hash path is not
+// downloaded again and again when the upstream serves the data listed
+// in the current meta data instead.
+func TestCacherGetByHashCurrentData(t *testing.T) {
+	t.Parallel()
+
+	const (
+		release   = "dists/noble/Release"
+		inRelease = "dists/noble/InRelease"
+	)
+	makeRelease := func(pkgs []byte) []byte {
+		return []byte(fmt.Sprintf("Acquire-By-Hash: yes\nSHA256:\n %s %d main/binary-amd64/Packages\n",
+			sha256Hex(pkgs), len(pkgs)))
+	}
+	oldPackages := []byte("Package: a\nFilename: pool/a.deb\nSize: 3\nSHA256: " + sha256Hex([]byte("old")) + "\n")
+	newPackages := []byte("Package: b\nFilename: pool/b.deb\nSize: 3\nSHA256: " + sha256Hex([]byte("new")) + "\n")
+	oldByHash := "dists/noble/main/binary-amd64/by-hash/SHA256/" + sha256Hex(oldPackages)
+
+	tr := newTestRepo()
+	tr.set(release, makeRelease(oldPackages))
+	tr.set(inRelease, makeRelease(newPackages))
+	tr.set(oldByHash, newPackages)
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	for _, p := range []string{release, inRelease} {
+		if status, _ := getData(t, c, "ubuntu/"+p); status != http.StatusOK {
+			t.Fatalf("status of %s = %d", p, status)
+		}
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		status, _ := getData(t, c, "ubuntu/"+oldByHash)
+		done <- status
+	}()
+
+	select {
+	case status := <-done:
+		if status != http.StatusBadGateway {
+			t.Errorf("status = %d, want %d", status, http.StatusBadGateway)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get did not return")
+	}
+	if n := tr.hits(oldByHash); n != 1 {
+		t.Errorf("by-hash was downloaded %d times, want 1", n)
+	}
+}

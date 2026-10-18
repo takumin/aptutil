@@ -702,9 +702,11 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		cur := c.info[dest]
 		c.fiLock.RUnlock()
 		// Get looks up a by-hash path with the same valid again, so
-		// only a download of dest itself is worth retrying.
+		// only a download of dest itself is worth retrying or
+		// accepting with the current checksums.  Data at a by-hash
+		// path that does not match the hash is not valid anyway.
 		switch {
-		case cur != nil && cur.Same(fi):
+		case p == dest && cur != nil && cur.Same(fi):
 		case p == dest && cur != nil && !cur.Same(valid):
 			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
 				"path": dest,

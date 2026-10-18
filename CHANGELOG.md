@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
   again.
 
 ### Fixed
+- [mirror] A section matched the indices of another section whose name
+  ends with it; e.g. `free` matched `non-free`.  A section now matches
+  only at a directory boundary.
 - [cacher] At startup, stale meta data cached, such as i18n/Index not
   downloaded again after Release was updated, or Release older than
   InRelease, could override the checksums listed in the newer ones,

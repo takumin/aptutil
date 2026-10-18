@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] At startup, stale meta data cached, such as i18n/Index not
+  downloaded again after Release was updated, or Release older than
+  InRelease, could override the checksums listed in the newer ones,
+  and the items matching the newer ones were answered with 502.  Release
+  files are now applied in the order of their Date, and the lists in
+  meta data files not matching the checksums listed for them are
+  ignored.
 - [mirror] An update of a mirror run in the same second as the previous
   one failed for the directory of the previous one, and so did the
   update of a mirror given twice on the command line.  The next second

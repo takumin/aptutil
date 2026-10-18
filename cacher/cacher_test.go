@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -576,6 +579,134 @@ func TestCacherRestartWithMetaWithoutPrefix(t *testing.T) {
 
 	if _, err := NewCacher(config); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCacherRestartWithStaleMeta tests that the lists in stale meta data
+// files cached do not override those in the newer ones at startup.
+func TestCacherRestartWithStaleMeta(t *testing.T) {
+	t.Parallel()
+
+	const (
+		dists       = "ubuntu/dists/noble/"
+		index       = "main/i18n/Index"
+		translation = "main/i18n/Translation-en.bz2"
+		packages    = "main/binary-amd64/Packages"
+	)
+	sha1Hex := func(data []byte) string {
+		fi, err := makeFileInfo("a", data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path.Base(fi.SHA1Path())
+	}
+	makeIndex := func(tr []byte) []byte {
+		return fmt.Appendf(nil, "SHA1:\n %s %d Translation-en.bz2\n", sha1Hex(tr), len(tr))
+	}
+	makePackages := func(name string) []byte {
+		data := "deb data of " + name
+		return fmt.Appendf(nil, "Package: %s\nFilename: pool/%s.deb\nSize: %d\nSHA256: %s\n",
+			name, name, len(data), sha256Hex([]byte(data)))
+	}
+	makeRelease := func(date string, files map[string][]byte) []byte {
+		b := fmt.Appendf(nil, "Date: %s\nSHA256:\n", date)
+		for _, name := range slices.Sorted(maps.Keys(files)) {
+			b = fmt.Appendf(b, " %s %d %s\n", sha256Hex(files[name]), len(files[name]), name)
+		}
+		return b
+	}
+	oldTranslation := []byte("old translation")
+	newTranslation := []byte("new translation")
+	oldPackages := makePackages("old")
+	newPackages := makePackages("new")
+
+	testCases := []struct {
+		name string
+		// files are the meta data files cached.
+		files map[string][]byte
+		// want are the checksums that the cacher should know.
+		want map[string][]byte
+		// listed and unlisted are items listed in the meta data files
+		// that the cacher should, or should not know.
+		listed, unlisted []string
+	}{
+		{
+			name: "Index not downloaded again",
+			files: map[string][]byte{
+				"Release": makeRelease("Sat, 18 Oct 2026 00:00:00 UTC", map[string][]byte{
+					index:       makeIndex(newTranslation),
+					translation: newTranslation,
+				}),
+				index: makeIndex(oldTranslation),
+			},
+			want: map[string][]byte{translation: newTranslation},
+		},
+		{
+			name: "Release older than InRelease",
+			files: map[string][]byte{
+				"InRelease": makeRelease("Sat, 18 Oct 2026 00:00:00 UTC", map[string][]byte{packages: newPackages}),
+				"Release":   makeRelease("Fri, 17 Oct 2026 00:00:00 UTC", map[string][]byte{packages: oldPackages}),
+				packages:    newPackages,
+			},
+			want:     map[string][]byte{packages: newPackages},
+			listed:   []string{"ubuntu/pool/new.deb"},
+			unlisted: []string{"ubuntu/pool/old.deb"},
+		},
+		{
+			name: "InRelease older than Release",
+			files: map[string][]byte{
+				"InRelease": makeRelease("Fri, 17 Oct 2026 00:00:00 UTC", map[string][]byte{packages: oldPackages}),
+				"Release":   makeRelease("Sat, 18 Oct 2026 00:00:00 UTC", map[string][]byte{packages: newPackages}),
+				packages:    newPackages,
+			},
+			want:     map[string][]byte{packages: newPackages},
+			listed:   []string{"ubuntu/pool/new.deb"},
+			unlisted: []string{"ubuntu/pool/old.deb"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			config := NewConfig()
+			config.MetaDirectory = t.TempDir()
+			config.CacheDirectory = t.TempDir()
+			config.Mapping = map[string]string{"ubuntu": "http://example.com"}
+			for name, data := range tc.files {
+				fp := filepath.Join(config.MetaDirectory, dists+name+fileSuffix)
+				if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(fp, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			c, err := NewCacher(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, data := range tc.want {
+				want, err := makeFileInfo(dists+name, data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fi := c.info[dists+name]; fi == nil || !fi.Same(want) {
+					t.Errorf("info[%s] = %v, want %v", name, fi, want)
+				}
+			}
+			for _, p := range tc.listed {
+				if _, ok := c.info[p]; !ok {
+					t.Errorf("%s is not listed", p)
+				}
+			}
+			for _, p := range tc.unlisted {
+				if _, ok := c.info[p]; ok {
+					t.Errorf("%s is listed", p)
+				}
+			}
+		})
 	}
 }
 

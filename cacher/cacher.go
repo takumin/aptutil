@@ -217,9 +217,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, fi := range metas {
-		c.updateListed(fi.Path(), parsed[i].fil, parsed[i].aliases)
-	}
+	c.applyMetas(meta, metas, parsed)
 
 	// add meta files w/o checksums (Release, Release.gpg, and InRelease).
 	for _, fi := range metas {
@@ -237,6 +235,78 @@ func NewCacher(config *Config) (*Cacher, error) {
 type parsedMeta struct {
 	fil     []*apt.FileInfo
 	aliases map[string]*apt.FileInfo
+	// date is Date of a Release file, or zero if unknown.
+	date time.Time
+}
+
+// applyMetas registers the items listed in metas, which have been parsed
+// into parsed at startup.
+//
+// Meta data files cached may be stale; e.g. i18n/Index is not
+// downloaded again after Release listing it is updated, and a download
+// of Release may keep failing while that of InRelease succeeds.  Release
+// files are applied in the order of their Date so that the newest one
+// wins, and the lists in meta data files not matching the checksums
+// listed for them are ignored.
+func (c *Cacher) applyMetas(meta *Storage, metas []*apt.FileInfo, parsed []parsedMeta) {
+	// metas have no checksums until they are parsed.
+	cur := make(map[string]*apt.FileInfo)
+	for _, fi := range meta.ListAll() {
+		cur[fi.Path()] = fi
+	}
+
+	order := make([]int, len(metas))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(i, j int) int {
+		return parsed[i].date.Compare(parsed[j].date)
+	})
+
+	// Ignoring the list in a stale meta data file may make another one
+	// stale, so repeat until no more meta data files become stale.
+	stale := make(map[string]bool)
+	for {
+		clear(c.info)
+		clear(c.aliases)
+		clear(c.listed)
+		clear(c.refs)
+		for _, i := range order {
+			if p := metas[i].Path(); !stale[p] {
+				c.updateListed(p, parsed[i].fil, parsed[i].aliases)
+			}
+		}
+
+		found := false
+		for _, i := range order {
+			p := metas[i].Path()
+			fi := c.info[p]
+			if stale[p] || fi == nil || cur[p] == nil || fi.Same(cur[p]) {
+				continue
+			}
+			log.Warn("ignored stale meta data", map[string]interface{}{
+				"path": p,
+			})
+			stale[p] = true
+			found = true
+		}
+		if !found {
+			return
+		}
+	}
+}
+
+// releaseDate returns Date in d of a Release file, or zero if unknown.
+func releaseDate(d apt.Paragraph) time.Time {
+	if len(d["Date"]) == 0 {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC1123, time.RFC1123Z} {
+		if t, err := time.Parse(layout, d["Date"][0]); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // parseMetas parses indices in meta concurrently, and returns the
@@ -297,7 +367,7 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 	if apt.SupportByHash(d) {
 		aliases = byHashAliases(fil)
 	}
-	return parsedMeta{fil: fil, aliases: aliases}, nil
+	return parsedMeta{fil: fil, aliases: aliases, date: releaseDate(d)}, nil
 }
 
 // newTransport returns an http.Transport that keeps up to maxConns idle

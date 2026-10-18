@@ -518,6 +518,9 @@ func (m *Mirror) download(ctx context.Context,
 	}()
 
 	var retries uint
+	// invalid is set when the data at p did not match fi, and by-hash
+	// paths are tried instead.
+	invalid := false
 	targets := []string{p}
 	if byhash && fi != nil {
 		targets = append(targets, byHashPaths(fi)...)
@@ -607,6 +610,15 @@ RETRY:
 	}
 
 	if r.status != 200 {
+		if invalid {
+			// p exists but is invalid, and so is not to be treated as
+			// missing even if its by-hash paths are.
+			if len(targets) > 1 {
+				targets = targets[1:]
+				goto RETRY
+			}
+			r.err = errors.New("invalid checksum for " + p)
+		}
 		return
 	}
 
@@ -644,6 +656,7 @@ RETRY:
 
 	if fi != nil && !fi.Same(fi2) {
 		if len(targets) > 1 {
+			invalid = true
 			targets = targets[1:]
 			log.Warn("try by-hash retrieval", map[string]interface{}{
 				"repo":   m.id,

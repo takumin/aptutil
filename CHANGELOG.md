@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] With `Acquire-By-Hash: yes`, an index whose data did not
+  match Release and whose by-hash paths were not found was treated as
+  missing, and the mirror was published without it.  The update now
+  fails for the invalid checksum, as it does without by-hash.
 - [cacher] HEAD responded with Content-Type and Accept-Ranges different
   from GET, e.g. `application/octet-stream` for Release, for which GET
   sniffed `text/plain`.  GET now uses the Content-Type of HEAD, and

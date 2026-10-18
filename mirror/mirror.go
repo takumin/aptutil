@@ -1063,7 +1063,9 @@ func (m *Mirror) handleResult(r *dlResult, allowMissing, byhash bool) (*apt.File
 		return nil, errors.Wrap(r.err, "download")
 	}
 
-	if allowMissing && r.status == http.StatusNotFound {
+	// some servers such as Amazon S3 return 403 for missing files.
+	missing := r.status == http.StatusNotFound || r.status == http.StatusForbidden
+	if allowMissing && missing {
 		log.Warn("missing file", map[string]interface{}{
 			"repo": m.id,
 			"path": r.path,

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] An index listed in Release but missing, such as uncompressed
+  Packages listed in Ubuntu Release, failed the update on a server that
+  returns 403 for missing files, such as Amazon S3, while it was
+  allowed to be missing on a server returning 404.  403 is now treated
+  as missing for indices, as it is for Release files.
 - [cacher] While Release and InRelease listed different versions of an
   index, e.g. until both were checked for updates, a request for the
   by-hash path of the version no longer current made the cacher

@@ -186,6 +186,39 @@ func TestNewCacherNonPositiveCheckInterval(t *testing.T) {
 	}
 }
 
+func TestNewCacherNegativeCachePeriod(t *testing.T) {
+	t.Parallel()
+
+	config := NewConfig()
+	config.MetaDirectory = t.TempDir()
+	config.CacheDirectory = t.TempDir()
+	config.CachePeriod = -1
+	if _, err := NewCacher(config); err == nil {
+		t.Error("NewCacher must fail with negative cache_period")
+	}
+}
+
+// TestCacherGetNoCachePeriod tests that Get returns the result of the
+// download it waited for even if the result has already expired.
+func TestCacherGetNoCachePeriod(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	c.cachePeriod = 0
+
+	const p = "pool/a.deb"
+	if status, _ := getData(t, c, "ubuntu/"+p); status != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", status, http.StatusNotFound)
+	}
+	if n := tr.hits(p); n != 1 {
+		t.Errorf("upstream hits = %d, want 1", n)
+	}
+}
+
 func TestCacherMaintReleaseUnmapped(t *testing.T) {
 	t.Parallel()
 

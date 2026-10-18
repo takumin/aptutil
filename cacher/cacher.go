@@ -100,6 +100,10 @@ type dlTask struct {
 	// done is closed when the download finishes.
 	done chan struct{}
 
+	// code is the HTTP status code of the download.  It is set before
+	// done is closed.
+	code int
+
 	// uncached is the path of the downloaded file that is too large to
 	// be cached.  It is set before done is closed, and removed when
 	// all the holders of the task released it.
@@ -122,6 +126,9 @@ type dlStatus struct {
 func NewCacher(config *Config) (*Cacher, error) {
 	if config.CheckInterval <= 0 {
 		return nil, errors.New("check_interval must be > 0")
+	}
+	if config.CachePeriod < 0 {
+		return nil, errors.New("cache_period must be >= 0")
 	}
 	checkInterval := time.Duration(config.CheckInterval) * time.Second
 	cachePeriod := time.Duration(config.CachePeriod) * time.Second
@@ -500,6 +507,7 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 
 	defer func() {
 		status := &dlStatus{code: statusCode}
+		t.code = statusCode
 		c.dlLock.Lock()
 		delete(c.dlTasks, p)
 		c.results[p] = status
@@ -857,6 +865,12 @@ RETRY:
 	case <-t.done:
 	}
 
+	// The result of the download is not looked up in c.results, which
+	// may have already expired it.
+	if t.code != http.StatusOK {
+		c.releaseTask(t)
+		return t.code, nil, nil
+	}
 	if t.uncached == "" {
 		c.releaseTask(t)
 		goto RETRY

@@ -387,6 +387,14 @@ func (m *Mirror) Update(ctx context.Context) error {
 		return errors.Wrap(err, m.id)
 	}
 
+	// clients may retrieve indices by hash from the previous mirror
+	// while it is replaced.
+	if m.current != nil {
+		if err := m.storage.KeepByHash(m.current); err != nil {
+			return errors.Wrap(err, m.id)
+		}
+	}
+
 	// all files are downloaded (or reused)
 	log.Info("saving meta data", map[string]interface{}{
 		"repo": m.id,

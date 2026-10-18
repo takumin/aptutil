@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Added
+- [mirror] The by-hash files of the indices in the previous mirror are
+  kept in the new one for one generation.  Before, a client that had
+  retrieved Release just before the mirror was replaced failed to
+  retrieve the indices listed in it by hash.
 - SHA512 in Release, Packages and Sources is now used to validate files,
   and the mirror creates `by-hash/SHA512` and the cacher serves it.
   Before, indices and items listed only with SHA512 were taken as

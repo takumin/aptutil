@@ -579,6 +579,12 @@ func (c *Cacher) target(p string) (string, *apt.FileInfo) {
 	if fi, ok := c.aliases[p]; ok {
 		return fi.Path(), fi
 	}
+	// info of meta data files not listed anywhere, such as Release,
+	// is just of the ones cached last, and the upstream may have
+	// updated them since.
+	if c.refs[p] == 0 {
+		return p, nil
+	}
 	return p, c.info[p]
 }
 

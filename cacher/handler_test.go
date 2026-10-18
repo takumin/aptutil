@@ -59,6 +59,7 @@ func TestCacheHandlerHidesInternalErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.info[p] = fi
+	c.refs[p] = 1
 
 	w := httptest.NewRecorder()
 	cacheHandler{c}.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+p, nil))

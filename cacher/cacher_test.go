@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -491,5 +492,37 @@ func TestCacherRestartWithBrokenMeta(t *testing.T) {
 	}
 	if n := tr.hits(p); n != 1 {
 		t.Errorf("upstream hits = %d, want 1", n)
+	}
+}
+
+func TestCacherGetLocalFailureStopsDownload(t *testing.T) {
+	t.Parallel()
+
+	const total = 256 << 20
+	var sent atomic.Int64
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(total))
+		for sent.Load() < total {
+			n, err := w.Write(chunk)
+			sent.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	// removing the cache directory makes TempFile fail.
+	if err := os.RemoveAll(c.items.dir); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := getData(t, c, "ubuntu/pool/a.deb"); status != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", status, http.StatusBadGateway)
+	}
+	if n := sent.Load(); n > total/4 {
+		t.Errorf("upstream sent %d MiB of %d MiB after a local failure", n>>20, total>>20)
 	}
 }

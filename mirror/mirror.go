@@ -449,8 +449,14 @@ type dlResult struct {
 	err      error
 }
 
+// maxDrain is the maximum size of the rest of a response body that is
+// read before closing it so that the connection can be reused.  The
+// rest of a larger body, such as of an item that cannot be stored for
+// a local failure, is not worth downloading just to reuse it.
+const maxDrain = 64 << 10
+
 func closeRespBody(r *http.Response) {
-	_, _ = io.Copy(io.Discard, r.Body)
+	_, _ = io.CopyN(io.Discard, r.Body, maxDrain)
 	_ = r.Body.Close()
 }
 

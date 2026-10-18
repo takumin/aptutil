@@ -1,6 +1,7 @@
 package mirror
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -364,5 +366,41 @@ func TestMirrorDownloadReleaseWaitsForDownloads(t *testing.T) {
 	}
 	if len(l) != 0 {
 		t.Errorf("temporary files are left: %v", l)
+	}
+}
+
+func TestMirrorDownloadLocalFailureStopsDownload(t *testing.T) {
+	t.Parallel()
+
+	const total = 256 << 20
+	var sent atomic.Int64
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(total))
+		for sent.Load() < total {
+			n, err := w.Write(chunk)
+			sent.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	m := newTestMirror(t, srv.URL)
+
+	// removing the storage directory makes TempFile fail.
+	if err := os.RemoveAll(m.storage.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan *dlResult, 1)
+	m.download(context.Background(), "a.deb", nil, false, ch)
+	r := <-ch
+	var lerr *localError
+	if !errors.As(r.err, &lerr) {
+		t.Errorf("err = %v, want a local error", r.err)
+	}
+	if n := sent.Load(); n > total/4 {
+		t.Errorf("upstream sent %d MiB of %d MiB after a local failure", n>>20, total>>20)
 	}
 }

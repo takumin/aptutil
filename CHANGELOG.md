@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- After failing to store a downloaded item locally, e.g. for a full
+  disk, the rest of the item was still downloaded and discarded before
+  reporting the failure.  Now at most 64 KiB of the rest is read.
 - [cacher] A negative `check_interval` was accepted, and the cacher
   panicked when it started checking updates of Release files.  It is
   now rejected as invalid.

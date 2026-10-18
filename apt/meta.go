@@ -291,7 +291,7 @@ func getFilesFromPackages(p string, r io.Reader) ([]*FileInfo, Paragraph, error)
 			}
 			fi.sha512sum = b
 		}
-		if !fi.hasAnyChecksum() {
+		if !fi.HasChecksum() {
 			return nil, nil, errors.New("no checksum for " + fpath + " in " + p)
 		}
 		l = append(l, fi)
@@ -411,7 +411,7 @@ func getFilesFromSources(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 		}
 
 		for _, fi := range m {
-			if !fi.hasAnyChecksum() {
+			if !fi.HasChecksum() {
 				return nil, nil, errors.New("no checksum in " + fi.path)
 			}
 			l = append(l, fi)

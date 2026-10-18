@@ -120,8 +120,8 @@ type dlStatus struct {
 
 // NewCacher constructs Cacher.
 func NewCacher(config *Config) (*Cacher, error) {
-	if config.CheckInterval == 0 {
-		return nil, errors.New("invaild check_interval")
+	if config.CheckInterval <= 0 {
+		return nil, errors.New("check_interval must be > 0")
 	}
 	checkInterval := time.Duration(config.CheckInterval) * time.Second
 	cachePeriod := time.Duration(config.CachePeriod) * time.Second

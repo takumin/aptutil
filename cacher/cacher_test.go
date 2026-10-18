@@ -170,6 +170,20 @@ func TestNewCacherNegativeMaxConns(t *testing.T) {
 	}
 }
 
+func TestNewCacherNonPositiveCheckInterval(t *testing.T) {
+	t.Parallel()
+
+	for _, interval := range []int{0, -1} {
+		config := NewConfig()
+		config.MetaDirectory = t.TempDir()
+		config.CacheDirectory = t.TempDir()
+		config.CheckInterval = interval
+		if _, err := NewCacher(config); err == nil {
+			t.Errorf("NewCacher must fail with check_interval = %d", interval)
+		}
+	}
+}
+
 func TestCacherMaintReleaseUnmapped(t *testing.T) {
 	t.Parallel()
 

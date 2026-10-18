@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] A negative `check_interval` was accepted, and the cacher
+  panicked when it started checking updates of Release files.  It is
+  now rejected as invalid.
 - Packages listing an item without MD5sum, SHA1 nor SHA256 were
   accepted, and the item was validated only by its size.  Release files
   without MD5Sum, SHA1 nor SHA256 were accepted as listing no indices,

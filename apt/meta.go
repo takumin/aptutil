@@ -135,7 +135,12 @@ func SupportByHash(d Paragraph) bool {
 	if len(p) != 1 {
 		return false
 	}
-	return p[0] == "yes"
+	// as StringToBool of APT does.
+	switch strings.ToLower(p[0]) {
+	case "yes", "true", "with", "on", "enable", "1":
+		return true
+	}
+	return false
 }
 
 func parseChecksum(l string) (p string, size uint64, csum []byte, err error) {

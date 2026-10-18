@@ -78,6 +78,20 @@ func TestAcquireByHash(t *testing.T) {
 	}
 }
 
+func TestSupportByHashValues(t *testing.T) {
+	t.Parallel()
+
+	for v, want := range map[string]bool{
+		"yes": true, "Yes": true, "true": true, "on": true, "1": true,
+		"no": false, "false": false, "0": false, "maybe": false,
+	} {
+		d := Paragraph{"Acquire-By-Hash": {v}}
+		if got := SupportByHash(d); got != want {
+			t.Errorf("SupportByHash(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
 func TestGetFilesFromRelease(t *testing.T) {
 	t.Parallel()
 

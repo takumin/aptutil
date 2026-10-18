@@ -122,6 +122,11 @@ type dlStatus struct {
 	code int
 }
 
+// within returns true if the clean absolute path p is dir or in dir.
+func within(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, string(filepath.Separator))+string(filepath.Separator))
+}
+
 // NewCacher constructs Cacher.
 func NewCacher(config *Config) (*Cacher, error) {
 	if config.CheckInterval <= 0 {
@@ -143,8 +148,10 @@ func NewCacher(config *Config) (*Cacher, error) {
 		return nil, errors.New("cache_dir must be an absolute path")
 	}
 
-	if metaDir == cacheDir {
-		return nil, errors.New("meta_dir and cache_dir must be different")
+	// Storage takes all files in its directory as its items, so that
+	// one of them would evict the items of the other.
+	if within(metaDir, cacheDir) || within(cacheDir, metaDir) {
+		return nil, errors.New("meta_dir and cache_dir must not overlap")
 	}
 
 	if config.CacheCapacity <= 0 {

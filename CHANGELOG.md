@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] `meta_dir` in `cache_dir`, or the other way around, was
+  accepted, and the cache evicted meta data files, e.g. making the
+  cacher fail to start.  Such configurations are now rejected.
 - [cacher] A file put directly in `meta_dir` by someone else made the
   cacher panic at startup.  It is now ignored.
 - [cacher] `.` and `..` were accepted as prefixes in `mapping`, and

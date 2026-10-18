@@ -186,6 +186,39 @@ func TestNewCacherNonPositiveCheckInterval(t *testing.T) {
 	}
 }
 
+func TestNewCacherOverlappingDirectories(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	testCases := []struct {
+		name        string
+		meta, cache string
+		wantErr     bool
+	}{
+		{name: "same", meta: dir, cache: dir, wantErr: true},
+		{name: "meta in cache", meta: filepath.Join(dir, "meta"), cache: dir, wantErr: true},
+		{name: "cache in meta", meta: dir, cache: filepath.Join(dir, "cache"), wantErr: true},
+		{name: "siblings", meta: filepath.Join(dir, "meta"), cache: filepath.Join(dir, "meta-cache")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			config := NewConfig()
+			config.MetaDirectory = tc.meta
+			config.CacheDirectory = tc.cache
+			_, err := NewCacher(config)
+			if tc.wantErr && err == nil {
+				t.Error("NewCacher must fail")
+			}
+			if !tc.wantErr && err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
 func TestNewCacherNegativeCachePeriod(t *testing.T) {
 	t.Parallel()
 

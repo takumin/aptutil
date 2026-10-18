@@ -69,7 +69,7 @@ func (mc *MirrConfig) Check() error {
 		return errors.New("flat repository cannot have sections")
 	}
 	if flat && len(mc.Architectures) != 0 {
-		return errors.New("flat repository cannot have sections")
+		return errors.New("flat repository cannot have architectures")
 	}
 	for _, suite := range mc.Suites[1:] {
 		if flat != isFlat(suite) {

@@ -94,8 +94,17 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		}
 	}
 
-	d := filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
-	err = os.Mkdir(d, 0o755)
+	// An update run in the same second has created the directory,
+	// which may be published, so use the next second instead.
+	var d string
+	for {
+		d = filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
+		err = os.Mkdir(d, 0o755)
+		if !os.IsExist(err) {
+			break
+		}
+		t = t.Add(time.Second)
+	}
 	if err == nil {
 		storage, err = NewStorage(d, id)
 	}

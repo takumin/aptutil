@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] An update of a mirror run in the same second as the previous
+  one failed for the directory of the previous one, and so did the
+  update of a mirror given twice on the command line.  The next second
+  is now used for the directory, and a mirror given twice is updated
+  once.
 - [cacher] `meta_dir` in `cache_dir`, or the other way around, was
   accepted, and the cache evicted meta data files, e.g. making the
   cacher fail to start.  Such configurations are now rejected.

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGCBrokenSymlink(t *testing.T) {
@@ -179,5 +180,42 @@ func TestUpdateMirrorsIsolatesFailures(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(c.Dir, "bad")); !os.IsNotExist(err) {
 		t.Errorf("bad must not be published: %v", err)
+	}
+}
+
+func TestUpdateMirrorsRepeated(t *testing.T) {
+	t.Parallel()
+
+	repo := flatRepo(map[string]string{"a.deb": "a"})
+	repo["a.deb"] = "a"
+	srv := serveRepo(t, repo)
+	u, err := url.Parse(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewConfig()
+	c.Dir = t.TempDir()
+	c.Mirrors = map[string]*MirrConfig{
+		"good": {URL: tomlURL{u}, Suites: []string{"/"}},
+	}
+
+	// a mirror given twice is updated once.
+	if err := updateMirrors(context.Background(), c, []string{"good", "good"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// updates in the same second do not conflict with each other.
+	now := time.Now()
+	for range 2 {
+		m, err := NewMirror(now, "good", c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Update(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.ReadFile(filepath.Join(c.Dir, "good", "a.deb")); err != nil {
+		t.Error(err)
 	}
 }

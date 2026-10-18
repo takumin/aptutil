@@ -74,7 +74,7 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		return nil, errors.New("max_conns must be >= 0")
 	}
 
-	var currentStorage *Storage
+	var currentStorage, storage *Storage
 	curdir, err := filepath.EvalSymlinks(filepath.Join(dir, id))
 	switch {
 	case os.IsNotExist(err):
@@ -87,17 +87,20 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		}
 		err = currentStorage.Load()
 		if err != nil {
+			_ = currentStorage.Close()
 			return nil, errors.Wrap(err, id)
 		}
 	}
 
 	d := filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
 	err = os.Mkdir(d, 0o755)
-	if err != nil {
-		return nil, errors.Wrap(err, id)
+	if err == nil {
+		storage, err = NewStorage(d, id)
 	}
-	storage, err := NewStorage(d, id)
 	if err != nil {
+		if currentStorage != nil {
+			_ = currentStorage.Close()
+		}
 		return nil, errors.Wrap(err, id)
 	}
 
@@ -322,7 +325,16 @@ func (m *Mirror) replaceLink() error {
 }
 
 // Update updates mirrored files.
+//
+// m cannot be used after Update returns.
 func (m *Mirror) Update(ctx context.Context) error {
+	defer func() {
+		_ = m.storage.Close()
+		if m.current != nil {
+			_ = m.current.Close()
+		}
+	}()
+
 	// download indices of suites concurrently.
 	suites := make([]*suiteIndices, len(m.mc.Suites))
 	env := well.NewEnvironment(ctx)
@@ -437,8 +449,14 @@ type dlResult struct {
 	err      error
 }
 
+// maxDrain is the maximum size of the rest of a response body that is
+// read before closing it so that the connection can be reused.  The
+// rest of a larger body, such as of an item that cannot be stored for
+// a local failure, is not worth downloading just to reuse it.
+const maxDrain = 64 << 10
+
 func closeRespBody(r *http.Response) {
-	_, _ = io.Copy(io.Discard, r.Body)
+	_, _ = io.CopyN(io.Discard, r.Body, maxDrain)
 	_ = r.Body.Close()
 }
 
@@ -500,6 +518,9 @@ func (m *Mirror) download(ctx context.Context,
 	}()
 
 	var retries uint
+	// invalid is set when the data at p did not match fi, and by-hash
+	// paths are tried instead.
+	invalid := false
 	targets := []string{p}
 	if byhash && fi != nil {
 		targets = append(targets, byHashPaths(fi)...)
@@ -589,6 +610,15 @@ RETRY:
 	}
 
 	if r.status != 200 {
+		if invalid {
+			// p exists but is invalid, and so is not to be treated as
+			// missing even if its by-hash paths are.
+			if len(targets) > 1 {
+				targets = targets[1:]
+				goto RETRY
+			}
+			r.err = errors.New("invalid checksum for " + p)
+		}
 		return
 	}
 
@@ -626,6 +656,7 @@ RETRY:
 
 	if fi != nil && !fi.Same(fi2) {
 		if len(targets) > 1 {
+			invalid = true
 			targets = targets[1:]
 			log.Warn("try by-hash retrieval", map[string]interface{}{
 				"repo":   m.id,
@@ -962,36 +993,44 @@ func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 		return nil
 	})
 
-	var wg sync.WaitGroup
-	for range reuseWorkers {
-		wg.Add(1)
-		env.Go(func(ctx context.Context) error {
-			defer wg.Done()
-			for fi := range items {
-				localfi, err := m.reuse(fi, byhash)
-				if err != nil {
-					return err
-				}
-				if localfi != nil {
-					mu.Lock()
-					reused = append(reused, localfi)
-					mu.Unlock()
-					processed.Add(1)
-					continue
-				}
-				select {
-				case missing <- fi:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+	reuseItems := func(ctx context.Context) error {
+		for fi := range items {
+			localfi, err := m.reuse(fi, byhash)
+			if err != nil {
+				return err
 			}
-			return nil
-		})
+			if localfi != nil {
+				mu.Lock()
+				reused = append(reused, localfi)
+				mu.Unlock()
+				processed.Add(1)
+				continue
+			}
+			select {
+			case missing <- fi:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
 	}
-	go func() {
+	// The workers are started together in a goroutine of env, which
+	// closes missing after all of them finish.  env.Go does not start
+	// a function once env is canceled, so counting the workers started
+	// separately by env.Go would wait forever for those not started.
+	env.Go(func(ctx context.Context) error {
+		defer close(missing)
+		var wg sync.WaitGroup
+		for range reuseWorkers {
+			wg.Go(func() {
+				if err := reuseItems(ctx); err != nil {
+					env.Cancel(err)
+				}
+			})
+		}
 		wg.Wait()
-		close(missing)
-	}()
+		return nil
+	})
 
 	env.Go(func(ctx context.Context) error {
 		for fi := range missing {

@@ -454,3 +454,36 @@ func TestStorageLookupCalculatesChecksums(t *testing.T) {
 		t.Errorf("used = %d, want %d", cm.used, len(data))
 	}
 }
+
+func TestStorageLookupRemovedWhileCalculatingChecksums(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := []byte("data")
+	err := os.WriteFile(filepath.Join(dir, "a"+fileSuffix), data, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cm := newTestStorage(t, dir, 0)
+	if err := cm.Load(); err != nil {
+		t.Fatal(err)
+	}
+
+	// the item is removed, e.g. evicted by Insert, before its file is
+	// opened to calculate checksums.
+	cm.calcChecksum = func(filename, p string) (*apt.FileInfo, error) {
+		if err := cm.Delete(p); err != nil {
+			t.Error(err)
+		}
+		return calcChecksum(filename, p)
+	}
+
+	fi, err := makeFileInfo("a", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cm.Lookup(fi); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Lookup = %v, want ErrNotFound", err)
+	}
+}

@@ -3,6 +3,47 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+- [mirror] A goroutine was left waiting forever when an update was
+  canceled or failed while starting to reuse items.
+- [mirror] With `Acquire-By-Hash: yes`, an index whose data did not
+  match Release and whose by-hash paths were not found was treated as
+  missing, and the mirror was published without it.  The update now
+  fails for the invalid checksum, as it does without by-hash.
+- [cacher] HEAD responded with Content-Type and Accept-Ranges different
+  from GET, e.g. `application/octet-stream` for Release, for which GET
+  sniffed `text/plain`.  GET now uses the Content-Type of HEAD, and
+  HEAD responds with Accept-Ranges as GET does.
+- [cacher] An item loaded at startup that was evicted while its
+  checksums were calculated was answered with 500 instead of being
+  downloaded again.
+- [cacher] When a Release file was updated while downloading an index
+  listed in it, the index was validated only against the checksums in
+  the previous Release, and failed with 502 even if it matched the
+  updated one.  The 502 was then returned to every client for
+  `cache_period`.  The index is now validated against the updated
+  checksums, or downloaded again with them.
+- After failing to store a downloaded item locally, e.g. for a full
+  disk, the rest of the item was still downloaded and discarded before
+  reporting the failure.  Now at most 64 KiB of the rest is read.
+- [cacher] A negative `check_interval` was accepted, and the cacher
+  panicked when it started checking updates of Release files.  It is
+  now rejected as invalid.
+- Packages listing an item without MD5sum, SHA1 nor SHA256 were
+  accepted, and the item was validated only by its size.  Release files
+  without MD5Sum, SHA1 nor SHA256 were accepted as listing no indices,
+  and the mirror published the suite without them.  They are now
+  rejected as invalid, as Sources are.
+- [mirror] A mirror could be published with files whose write-back
+  failed, when syncfs(2) reported the error to another mirror in the
+  same file system.  The mirror directory is now opened before files
+  are written so that syncfs(2) reports such errors to every mirror.
+- [mirror] A mirror without `url` made go-apt-mirror panic, stopping
+  updates of the other mirrors.  It is now rejected as invalid.
+- [cacher] The cacher failed to start once it had cached broken meta
+  data, such as an HTML page served for InRelease by a captive portal,
+  until they were removed by hand.  They are now served as they are
+  listing no items, as they are after downloading.
 
 ## [1.5.3] - 2026-10-11
 ### Changed

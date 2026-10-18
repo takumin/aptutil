@@ -121,7 +121,7 @@ func TestMirrorDownloadPartialChecksums(t *testing.T) {
 func TestMirrorExtractItemsByHashPartialChecksums(t *testing.T) {
 	t.Parallel()
 
-	index := []byte("Package: a\nFilename: pool/a.deb\nSize: 1\n")
+	index := []byte("Package: a\nFilename: pool/a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n")
 	fi := releaseFileInfo(t, "MD5Sum", index)
 
 	m := newTestMirror(t, "http://example.com")

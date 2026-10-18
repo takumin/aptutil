@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -167,6 +169,20 @@ func TestNewCacherNegativeMaxConns(t *testing.T) {
 	config.MaxConns = -1
 	if _, err := NewCacher(config); err == nil {
 		t.Error("NewCacher must fail with negative max_conns")
+	}
+}
+
+func TestNewCacherNonPositiveCheckInterval(t *testing.T) {
+	t.Parallel()
+
+	for _, interval := range []int{0, -1} {
+		config := NewConfig()
+		config.MetaDirectory = t.TempDir()
+		config.CacheDirectory = t.TempDir()
+		config.CheckInterval = interval
+		if _, err := NewCacher(config); err == nil {
+			t.Errorf("NewCacher must fail with check_interval = %d", interval)
+		}
 	}
 }
 
@@ -441,5 +457,163 @@ func TestCacherGetUnlisted(t *testing.T) {
 	}
 	if n := tr.hits(p); n != 1 {
 		t.Errorf("upstream hits after restart = %d, want 1", n)
+	}
+}
+
+func TestCacherRestartWithBrokenMeta(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	const p = "dists/stable/InRelease"
+	tr.set(p, []byte("<!DOCTYPE html>\n<html></html>\n"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	// broken meta data are accepted and cached as is.
+	if status, _ := getData(t, c, "ubuntu/"+p); status != http.StatusOK {
+		t.Fatalf("Get = %d", status)
+	}
+
+	// the cacher starts even with the broken meta data, and serves them.
+	c2, err := NewCacher(&Config{
+		CheckInterval:  defaultCheckInterval,
+		CachePeriod:    defaultCachePeriod,
+		MetaDirectory:  c.meta.dir,
+		CacheDirectory: c.items.dir,
+		CacheCapacity:  defaultCacheCapacity,
+		Mapping:        map[string]string{"ubuntu": srv.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := getData(t, c2, "ubuntu/"+p); status != http.StatusOK {
+		t.Fatalf("Get after restart = %d", status)
+	}
+	if n := tr.hits(p); n != 1 {
+		t.Errorf("upstream hits = %d, want 1", n)
+	}
+}
+
+func TestCacherGetLocalFailureStopsDownload(t *testing.T) {
+	t.Parallel()
+
+	const total = 256 << 20
+	var sent atomic.Int64
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(total))
+		for sent.Load() < total {
+			n, err := w.Write(chunk)
+			sent.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	// removing the cache directory makes TempFile fail.
+	if err := os.RemoveAll(c.items.dir); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := getData(t, c, "ubuntu/pool/a.deb"); status != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", status, http.StatusBadGateway)
+	}
+	if n := sent.Load(); n > total/4 {
+		t.Errorf("upstream sent %d MiB of %d MiB after a local failure", n>>20, total>>20)
+	}
+}
+
+func TestCacherGetReleaseUpdatedWhileDownloading(t *testing.T) {
+	t.Parallel()
+
+	const (
+		release  = "dists/noble/Release"
+		packages = "dists/noble/main/binary-amd64/Packages"
+	)
+	makePackages := func(name string) []byte {
+		data := "deb data of " + name
+		return fmt.Appendf(nil, "Package: %s\nFilename: pool/%s.deb\nSize: %d\nSHA256: %s\n",
+			name, name, len(data), sha256Hex([]byte(data)))
+	}
+	makeRelease := func(pkgs []byte) []byte {
+		return fmt.Appendf(nil, "SHA256:\n %s %d main/binary-amd64/Packages\n",
+			sha256Hex(pkgs), len(pkgs))
+	}
+	oldPackages := makePackages("old")
+	newPackages := makePackages("new")
+
+	testCases := []struct {
+		name string
+		// served is the data served for the download of Packages that
+		// started before Release is updated.
+		served []byte
+	}{
+		{
+			name:   "matching the updated Release",
+			served: newPackages,
+		},
+		{
+			name:   "matching neither",
+			served: []byte("broken"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := newTestRepo()
+			tr.set(release, makeRelease(oldPackages))
+			tr.set(packages, oldPackages)
+
+			started := make(chan struct{})
+			unblock := make(chan struct{})
+			var blocked atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/"+packages && blocked.CompareAndSwap(false, true) {
+					close(started)
+					<-unblock
+					_, _ = w.Write(tc.served)
+					return
+				}
+				tr.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+
+			c := newTestCacher(t, srv.URL)
+			if status, _ := getData(t, c, "ubuntu/"+release); status != http.StatusOK {
+				t.Fatalf("status of Release = %d", status)
+			}
+
+			type result struct {
+				status int
+				data   string
+			}
+			done := make(chan result, 1)
+			go func() {
+				status, data := getData(t, c, "ubuntu/"+packages)
+				done <- result{status, data}
+			}()
+
+			<-started
+			tr.set(release, makeRelease(newPackages))
+			tr.set(packages, newPackages)
+			<-c.Download("ubuntu/"+release, nil)
+			close(unblock)
+
+			select {
+			case r := <-done:
+				if r.status != http.StatusOK || r.data != string(newPackages) {
+					t.Errorf("Get = %d, %q, want the updated Packages", r.status, r.data)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("Get did not return")
+			}
+		})
 	}
 }

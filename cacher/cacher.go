@@ -120,8 +120,8 @@ type dlStatus struct {
 
 // NewCacher constructs Cacher.
 func NewCacher(config *Config) (*Cacher, error) {
-	if config.CheckInterval == 0 {
-		return nil, errors.New("invaild check_interval")
+	if config.CheckInterval <= 0 {
+		return nil, errors.New("check_interval must be > 0")
 	}
 	checkInterval := time.Duration(config.CheckInterval) * time.Second
 	cachePeriod := time.Duration(config.CachePeriod) * time.Second
@@ -265,7 +265,14 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 	}
 	fil, d, err := apt.ExtractFileInfo(t[1], f)
 	if err != nil {
-		return parsedMeta{}, errors.Wrap(err, "ExtractFileInfo("+fi.Path()+")")
+		// Download accepts broken meta data as is, so they may be
+		// stored.  Serve them as they are listing no items instead of
+		// failing to start until they are removed by hand.
+		log.Error("invalid meta data", map[string]interface{}{
+			"path":  fi.Path(),
+			"error": err.Error(),
+		})
+		return parsedMeta{}, nil
 	}
 	fil = addPrefix(t[0], fil)
 	var aliases map[string]*apt.FileInfo
@@ -383,8 +390,14 @@ func (c *Cacher) maintRelease(ctx context.Context, p string, withGPG bool) {
 	}
 }
 
+// maxDrain is the maximum size of the rest of a response body that is
+// read before closing it so that the connection can be reused.  The
+// rest of a larger body, such as of an item that cannot be stored for
+// a local failure, is not worth downloading just to reuse it.
+const maxDrain = 64 << 10
+
 func closeRespBody(r *http.Response) {
-	_, _ = io.Copy(io.Discard, r.Body)
+	_, _ = io.CopyN(io.Discard, r.Body, maxDrain)
 	_ = r.Body.Close()
 }
 
@@ -593,10 +606,26 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		return
 	}
 	if valid != nil && !valid.Same(fi) {
-		log.Warn("downloaded data is not valid", map[string]interface{}{
-			"url": u.String(),
-		})
-		return
+		// A meta data file may have been updated while downloading,
+		// and now list dest with the checksums of the downloaded data,
+		// or with others that Get should retry with.
+		c.fiLock.RLock()
+		cur := c.info[dest]
+		c.fiLock.RUnlock()
+		switch {
+		case cur != nil && cur.Same(fi):
+		case cur != nil && !cur.Same(valid):
+			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
+				"path": dest,
+			})
+			statusCode = http.StatusOK
+			return
+		default:
+			log.Warn("downloaded data is not valid", map[string]interface{}{
+				"url": u.String(),
+			})
+			return
+		}
 	}
 
 	var fil []*apt.FileInfo

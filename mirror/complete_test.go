@@ -160,10 +160,44 @@ func TestMirrorConsistentReleases(t *testing.T) {
 	}
 }
 
+func TestMirrorInvalidIndex(t *testing.T) {
+	t.Parallel()
+
+	packages := "Package: a\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n"
+
+	for _, byhash := range []bool{false, true} {
+		t.Run(fmt.Sprintf("byhash=%v", byhash), func(t *testing.T) {
+			t.Parallel()
+
+			// Contents-amd64 is not scanned, and may be missing, but must
+			// not be invalid even if it is not served by hash.
+			release := releaseOf(map[string]string{"Packages": packages, "Contents-amd64": "contents"})
+			if byhash {
+				release = "Acquire-By-Hash: yes\n" + release
+			}
+			files := map[string]string{
+				"Release":        release,
+				"Release.gpg":    "dummy",
+				"Packages":       packages,
+				"Contents-amd64": "stale contents",
+				"a.deb":          "a",
+			}
+
+			dir, err := updateOnce(t, files, []string{"/"}, false)
+			if err == nil {
+				t.Error("update must fail")
+			}
+			if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+				t.Errorf("mirror must not be published: %v", err)
+			}
+		})
+	}
+}
+
 func TestMirrorMissingIndex(t *testing.T) {
 	t.Parallel()
 
-	packages := "Package: a\nFilename: a.deb\nSize: 1\n"
+	packages := "Package: a\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n"
 	packagesGz := gzipped(t, packages)
 
 	testCases := []struct {

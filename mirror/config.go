@@ -57,6 +57,9 @@ func isFlat(suite string) bool {
 
 // Check vaildates the configuration.
 func (mc *MirrConfig) Check() error {
+	if mc.URL.URL == nil {
+		return errors.New("no url")
+	}
 	if len(mc.Suites) == 0 {
 		return errors.New("no suites")
 	}

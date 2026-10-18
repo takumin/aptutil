@@ -17,6 +17,12 @@ func TestURLMap(t *testing.T) {
 		t.Error(`empty prefix must be invalid`)
 	}
 
+	for _, prefix := range []string{".", ".."} {
+		if err := um.Register(prefix, u); !errors.Is(err, ErrInvalidPrefix) {
+			t.Errorf("Register(%q) = %v, want ErrInvalidPrefix", prefix, err)
+		}
+	}
+
 	err = um.Register("hoge/fuga", u)
 	if !errors.Is(err, ErrInvalidPrefix) {
 		t.Error(`hoge/fuga must be an invalid prefix`)

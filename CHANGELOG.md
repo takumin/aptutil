@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] `.` and `..` were accepted as prefixes in `mapping`, and
+  items for `..` were stored outside `meta_dir` and `cache_dir`.  They
+  are now rejected as invalid.
 - [mirror] A directory was left open when fsync(2) on it failed.
 - [cacher] Once a cached file was removed by someone else, requests
   for the item were answered with 500 until it was evicted or the

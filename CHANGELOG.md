@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- Packages listing an item without MD5sum, SHA1 nor SHA256 were
+  accepted, and the item was validated only by its size.  Release files
+  without MD5Sum, SHA1 nor SHA256 were accepted as listing no indices,
+  and the mirror published the suite without them.  They are now
+  rejected as invalid, as Sources are.
 - [mirror] A mirror could be published with files whose write-back
   failed, when syncfs(2) reported the error to another mirror in the
   same file system.  The mirror directory is now opened before files

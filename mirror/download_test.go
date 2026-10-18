@@ -117,7 +117,7 @@ func TestMirrorDownloadCancelDuringBackoff(t *testing.T) {
 func TestMirrorUnlimitedConns(t *testing.T) {
 	t.Parallel()
 
-	srv := serveRepo(t, map[string]string{"dists/s/InRelease": "Origin: test\n"})
+	srv := serveRepo(t, map[string]string{"dists/s/InRelease": "Origin: test\n" + releaseOf(map[string]string{"README": "readme"})})
 
 	u, err := url.Parse(srv.URL + "/")
 	if err != nil {
@@ -141,8 +141,8 @@ func TestMirrorUnlimitedConns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(indexMap) != 0 {
-		t.Errorf("indexMap = %v, want empty", indexMap)
+	if _, ok := indexMap["dists/s/README"]; !ok || len(indexMap) != 1 {
+		t.Errorf("indexMap = %v, want dists/s/README only", indexMap)
 	}
 }
 

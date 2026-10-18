@@ -714,3 +714,35 @@ func TestExtractFileInfoWithXZ(t *testing.T) {
 		t.Error("pool/c/cybozu-abc_0.2.2-1_amd64.deb")
 	}
 }
+
+func TestExtractFileInfoNoChecksum(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		p    string
+		data string
+	}{
+		{
+			name: "Release",
+			p:    "ubuntu/dists/testing/Release",
+			data: "Origin: test\nSHA512:\n 0123 3 main/binary-amd64/Packages\n",
+		},
+		{
+			name: "Packages",
+			p:    "ubuntu/dists/testing/main/binary-amd64/Packages",
+			data: "Package: a\nFilename: pool/a.deb\nSize: 1\nSHA512: 0123\n",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := ExtractFileInfo(tc.p, strings.NewReader(tc.data))
+			if err == nil {
+				t.Error("ExtractFileInfo must fail without supported checksums")
+			}
+		})
+	}
+}

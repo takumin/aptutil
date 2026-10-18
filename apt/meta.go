@@ -155,7 +155,7 @@ func getFilesFromRelease(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 	sha256sums := d["SHA256"]
 
 	if len(md5sums) == 0 && len(sha1sums) == 0 && len(sha256sums) == 0 {
-		return nil, d, nil
+		return nil, nil, errors.New("no checksum in " + p)
 	}
 
 	m := make(map[string]*FileInfo)
@@ -297,6 +297,9 @@ func getFilesFromPackages(p string, r io.Reader) ([]*FileInfo, Paragraph, error)
 				return nil, nil, err
 			}
 			fi.sha256sum = b
+		}
+		if len(fi.md5sum) == 0 && len(fi.sha1sum) == 0 && len(fi.sha256sum) == 0 {
+			return nil, nil, errors.New("no checksum for " + fpath + " in " + p)
 		}
 		l = append(l, fi)
 	}

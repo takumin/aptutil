@@ -38,12 +38,12 @@ type Config struct {
 
 	// MetaDirectory specifies a directory to store APT meta data files.
 	//
-	// This must differ from CacheDirectory.
+	// This must not be CacheDirectory, nor be in or contain it.
 	MetaDirectory string `toml:"meta_dir"`
 
 	// CacheDirectory specifies a directory to cache non-meta data files.
 	//
-	// This must differ from MetaDirectory.
+	// This must not be MetaDirectory, nor be in or contain it.
 	CacheDirectory string `toml:"cache_dir"`
 
 	// CacheCapacity specifies how many bytes can be stored in CacheDirectory.

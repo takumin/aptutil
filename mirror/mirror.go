@@ -94,8 +94,17 @@ func NewMirror(t time.Time, id string, c *Config) (*Mirror, error) {
 		}
 	}
 
-	d := filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
-	err = os.Mkdir(d, 0o755)
+	// An update run in the same second has created the directory,
+	// which may be published, so use the next second instead.
+	var d string
+	for {
+		d = filepath.Join(dir, "."+id+"."+t.Format(timestampFormat))
+		err = os.Mkdir(d, 0o755)
+		if !os.IsExist(err) {
+			break
+		}
+		t = t.Add(time.Second)
+	}
 	if err == nil {
 		storage, err = NewStorage(d, id)
 	}
@@ -376,6 +385,14 @@ func (m *Mirror) Update(ctx context.Context) error {
 	_, err := m.downloadItems(ctx, itemMap)
 	if err != nil {
 		return errors.Wrap(err, m.id)
+	}
+
+	// clients may retrieve indices by hash from the previous mirror
+	// while it is replaced.
+	if m.current != nil {
+		if err := m.storage.KeepByHash(m.current); err != nil {
+			return errors.Wrap(err, m.id)
+		}
 	}
 
 	// all files are downloaded (or reused)

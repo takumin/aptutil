@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cybozu-go/aptutil/apt"
 )
@@ -243,5 +246,101 @@ func TestMirrorIndicesToScan(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("indicesToScan = %v, want %v", got, want)
+	}
+}
+
+func TestMirrorByHashSHA512(t *testing.T) {
+	t.Parallel()
+
+	packages := "Package: a\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n"
+	fi, err := apt.CopyWithFileInfo(io.Discard, strings.NewReader(packages), "Packages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := fmt.Sprintf("Acquire-By-Hash: yes\nSHA256:\n %s %d Packages\nSHA512:\n %s %d Packages\n",
+		path.Base(fi.SHA256Path()), len(packages), path.Base(fi.SHA512Path()), len(packages))
+	files := map[string]string{
+		"Release":     release,
+		"Release.gpg": "dummy",
+		"Packages":    packages,
+		"a.deb":       "a",
+	}
+
+	dir, err := updateOnce(t, files, []string{"/"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// apt retrieves indices by the strongest hash listed in Release.
+	for _, p := range []string{fi.SHA512Path(), fi.SHA256Path()} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// TestMirrorKeepByHash tests that the by-hash files of the indices in the
+// previous mirror are kept for one generation.
+func TestMirrorKeepByHash(t *testing.T) {
+	t.Parallel()
+
+	makePackages := func(name string) (string, *apt.FileInfo) {
+		data := fmt.Sprintf("Package: %s\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n", name)
+		fi, err := apt.CopyWithFileInfo(io.Discard, strings.NewReader(data), "Packages")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data, fi
+	}
+
+	var files atomic.Pointer[map[string]string]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := (*files.Load())[strings.TrimPrefix(r.URL.Path, "/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(data))
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewConfig()
+	c.Dir = t.TempDir()
+	c.Mirrors = map[string]*MirrConfig{
+		"test": {URL: tomlURL{u}, Suites: []string{"/"}},
+	}
+
+	var fis []*apt.FileInfo
+	for i, name := range []string{"a", "b", "c"} {
+		packages, fi := makePackages(name)
+		fis = append(fis, fi)
+		files.Store(&map[string]string{
+			"Release": fmt.Sprintf("Acquire-By-Hash: yes\nSHA256:\n %s %d Packages\n",
+				path.Base(fi.SHA256Path()), len(packages)),
+			"Release.gpg": "dummy",
+			"Packages":    packages,
+			"a.deb":       "a",
+		})
+
+		m, err := NewMirror(time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC), "test", c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Update(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dir := filepath.Join(c.Dir, "test")
+	for i, fi := range fis {
+		_, err := os.Stat(filepath.Join(dir, fi.SHA256Path()))
+		switch {
+		case i == 0 && !os.IsNotExist(err):
+			t.Errorf("by-hash of the index two generations ago must be removed: %v", err)
+		case i > 0 && err != nil:
+			t.Error(err)
+		}
 	}
 }

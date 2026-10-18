@@ -2,7 +2,10 @@ package mirror
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,4 +252,67 @@ func TestStorage(t *testing.T) {
 	t.Run("BadConstruction", testStorageBadConstruction)
 	t.Run("Lookup", testStorageLookup)
 	t.Run("Store", testStorageStore)
+}
+
+// TestStorageLookupWithoutSHA512 tests that a file recorded without
+// SHA512 by older versions is reused if it matches SHA512 listed now.
+func TestStorageLookupWithoutSHA512(t *testing.T) {
+	t.Parallel()
+
+	const p = "pool/a.deb"
+	data := []byte("data")
+	fi, err := makeFileInfo(p, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name   string
+		onDisk []byte
+		found  bool
+	}{
+		{name: "same", onDisk: data, found: true},
+		{name: "corrupted", onDisk: []byte("atad")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := NewStorage(t.TempDir(), "pre")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+
+			// info.json written by older versions has no SHA512Sum.
+			old := new(apt.FileInfo)
+			j := fmt.Sprintf(`{"Path":%q,"Size":%d,"SHA256Sum":%q}`, p, len(data), path.Base(fi.SHA256Path()))
+			if err := json.Unmarshal([]byte(j), old); err != nil {
+				t.Fatal(err)
+			}
+			s.info[p] = old
+			fp := filepath.Join(s.Dir(), "pre", p)
+			if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(fp, tc.onDisk, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			fi2, fullpath := s.Lookup(fi, true)
+			if !tc.found {
+				if fi2 != nil {
+					t.Error("a corrupted file must not be found")
+				}
+				return
+			}
+			if fi2 == nil || fullpath != fp {
+				t.Fatalf("Lookup = %v, %q, want the file", fi2, fullpath)
+			}
+			if fi2.SHA512Path() != fi.SHA512Path() {
+				t.Errorf("SHA512Path() = %q, want %q", fi2.SHA512Path(), fi.SHA512Path())
+			}
+		})
+	}
 }

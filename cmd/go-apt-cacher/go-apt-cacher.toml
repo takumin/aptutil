@@ -15,7 +15,7 @@ cache_period = 3
 meta_dir = "/var/spool/go-apt-cacher/meta"
 
 # Directory for non-meta data files.
-# This directory must be different from meta_dir.
+# This directory must not be meta_dir, nor be in or contain it.
 # The directory owner must be the same as the process owner of go-apt-cacher.
 cache_dir = "/var/spool/go-apt-cacher/cache"
 

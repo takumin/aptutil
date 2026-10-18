@@ -52,7 +52,7 @@ func byHashAliases(fil []*apt.FileInfo) map[string]*apt.FileInfo {
 		if apt.IsMeta(fi.Path()) && !apt.IsSupported(fi.Path()) {
 			continue
 		}
-		for _, hp := range []string{fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
+		for _, hp := range []string{fi.SHA512Path(), fi.SHA256Path(), fi.SHA1Path(), fi.MD5SumPath()} {
 			if hp != "" {
 				m[hp] = fi
 			}
@@ -122,6 +122,11 @@ type dlStatus struct {
 	code int
 }
 
+// within returns true if the clean absolute path p is dir or in dir.
+func within(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, string(filepath.Separator))+string(filepath.Separator))
+}
+
 // NewCacher constructs Cacher.
 func NewCacher(config *Config) (*Cacher, error) {
 	if config.CheckInterval <= 0 {
@@ -143,8 +148,10 @@ func NewCacher(config *Config) (*Cacher, error) {
 		return nil, errors.New("cache_dir must be an absolute path")
 	}
 
-	if metaDir == cacheDir {
-		return nil, errors.New("meta_dir and cache_dir must be different")
+	// Storage takes all files in its directory as its items, so that
+	// one of them would evict the items of the other.
+	if within(metaDir, cacheDir) || within(cacheDir, metaDir) {
+		return nil, errors.New("meta_dir and cache_dir must not overlap")
 	}
 
 	if config.CacheCapacity <= 0 {
@@ -210,9 +217,7 @@ func NewCacher(config *Config) (*Cacher, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, fi := range metas {
-		c.updateListed(fi.Path(), parsed[i].fil, parsed[i].aliases)
-	}
+	c.applyMetas(meta, metas, parsed)
 
 	// add meta files w/o checksums (Release, Release.gpg, and InRelease).
 	for _, fi := range metas {
@@ -230,6 +235,78 @@ func NewCacher(config *Config) (*Cacher, error) {
 type parsedMeta struct {
 	fil     []*apt.FileInfo
 	aliases map[string]*apt.FileInfo
+	// date is Date of a Release file, or zero if unknown.
+	date time.Time
+}
+
+// applyMetas registers the items listed in metas, which have been parsed
+// into parsed at startup.
+//
+// Meta data files cached may be stale; e.g. i18n/Index is not
+// downloaded again after Release listing it is updated, and a download
+// of Release may keep failing while that of InRelease succeeds.  Release
+// files are applied in the order of their Date so that the newest one
+// wins, and the lists in meta data files not matching the checksums
+// listed for them are ignored.
+func (c *Cacher) applyMetas(meta *Storage, metas []*apt.FileInfo, parsed []parsedMeta) {
+	// metas have no checksums until they are parsed.
+	cur := make(map[string]*apt.FileInfo)
+	for _, fi := range meta.ListAll() {
+		cur[fi.Path()] = fi
+	}
+
+	order := make([]int, len(metas))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(i, j int) int {
+		return parsed[i].date.Compare(parsed[j].date)
+	})
+
+	// Ignoring the list in a stale meta data file may make another one
+	// stale, so repeat until no more meta data files become stale.
+	stale := make(map[string]bool)
+	for {
+		clear(c.info)
+		clear(c.aliases)
+		clear(c.listed)
+		clear(c.refs)
+		for _, i := range order {
+			if p := metas[i].Path(); !stale[p] {
+				c.updateListed(p, parsed[i].fil, parsed[i].aliases)
+			}
+		}
+
+		found := false
+		for _, i := range order {
+			p := metas[i].Path()
+			fi := c.info[p]
+			if stale[p] || fi == nil || cur[p] == nil || fi.Same(cur[p]) {
+				continue
+			}
+			log.Warn("ignored stale meta data", map[string]interface{}{
+				"path": p,
+			})
+			stale[p] = true
+			found = true
+		}
+		if !found {
+			return
+		}
+	}
+}
+
+// releaseDate returns Date in d of a Release file, or zero if unknown.
+func releaseDate(d apt.Paragraph) time.Time {
+	if len(d["Date"]) == 0 {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC1123, time.RFC1123Z} {
+		if t, err := time.Parse(layout, d["Date"][0]); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // parseMetas parses indices in meta concurrently, and returns the
@@ -268,7 +345,11 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 
 	t := strings.SplitN(fi.Path(), "/", 2)
 	if len(t) != 2 {
-		panic("there should always be a prefix!")
+		// The cacher never stores meta data there, but someone else may.
+		log.Error("meta data without prefix", map[string]interface{}{
+			"path": fi.Path(),
+		})
+		return parsedMeta{}, nil
 	}
 	fil, d, err := apt.ExtractFileInfo(t[1], f)
 	if err != nil {
@@ -286,7 +367,7 @@ func parseMeta(meta *Storage, fi *apt.FileInfo) (parsedMeta, error) {
 	if apt.SupportByHash(d) {
 		aliases = byHashAliases(fil)
 	}
-	return parsedMeta{fil: fil, aliases: aliases}, nil
+	return parsedMeta{fil: fil, aliases: aliases, date: releaseDate(d)}, nil
 }
 
 // newTransport returns an http.Transport that keeps up to maxConns idle

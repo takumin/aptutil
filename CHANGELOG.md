@@ -3,7 +3,41 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+- [mirror] The by-hash files of the indices in the previous mirror are
+  kept in the new one for one generation.  Before, a client that had
+  retrieved Release just before the mirror was replaced failed to
+  retrieve the indices listed in it by hash.
+- SHA512 in Release, Packages and Sources is now used to validate files,
+  and the mirror creates `by-hash/SHA512` and the cacher serves it.
+  Before, indices and items listed only with SHA512 were taken as
+  listing nothing or having no checksum, and apt requesting
+  `by-hash/SHA512` of a mirror, as it does for the strongest hash in
+  Release, got 404.  Files mirrored by older versions are checked
+  against SHA512 by reading them once, instead of downloading them
+  again.
+
 ### Fixed
+- [cacher] At startup, stale meta data cached, such as i18n/Index not
+  downloaded again after Release was updated, or Release older than
+  InRelease, could override the checksums listed in the newer ones,
+  and the items matching the newer ones were answered with 502.  Release
+  files are now applied in the order of their Date, and the lists in
+  meta data files not matching the checksums listed for them are
+  ignored.
+- [mirror] An update of a mirror run in the same second as the previous
+  one failed for the directory of the previous one, and so did the
+  update of a mirror given twice on the command line.  The next second
+  is now used for the directory, and a mirror given twice is updated
+  once.
+- [cacher] `meta_dir` in `cache_dir`, or the other way around, was
+  accepted, and the cache evicted meta data files, e.g. making the
+  cacher fail to start.  Such configurations are now rejected.
+- [cacher] A file put directly in `meta_dir` by someone else made the
+  cacher panic at startup.  It is now ignored.
+- [cacher] `.` and `..` were accepted as prefixes in `mapping`, and
+  items for `..` were stored outside `meta_dir` and `cache_dir`.  They
+  are now rejected as invalid.
 - [mirror] A directory was left open when fsync(2) on it failed.
 - [cacher] Once a cached file was removed by someone else, requests
   for the item were answered with 500 until it was evicted or the
@@ -48,10 +82,8 @@ All notable changes to this project will be documented in this file.
 - [cacher] A negative `check_interval` was accepted, and the cacher
   panicked when it started checking updates of Release files.  It is
   now rejected as invalid.
-- Packages listing an item without MD5sum, SHA1 nor SHA256 were
-  accepted, and the item was validated only by its size.  Release files
-  listing indices only with SHA512 were accepted as listing no indices,
-  and the mirror published the suite without them.  They are now
+- Packages listing an item without any supported checksum were
+  accepted, and the item was validated only by its size.  They are now
   rejected as invalid, as Sources are.
 - [mirror] A mirror could be published with files whose write-back
   failed, when syncfs(2) reported the error to another mirror in the

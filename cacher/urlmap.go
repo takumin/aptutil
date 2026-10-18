@@ -22,7 +22,8 @@ type URLMap map[string]*url.URL
 
 // Register registeres a prefix for a remote URL.
 func (um *URLMap) Register(prefix string, u *url.URL) error {
-	if !validPrefix.MatchString(prefix) {
+	// "." and ".." would make items stored outside the directories.
+	if !validPrefix.MatchString(prefix) || prefix == "." || prefix == ".." {
 		return ErrInvalidPrefix
 	}
 

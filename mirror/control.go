@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -41,6 +42,9 @@ func isMirrorTarget(target, id string) bool {
 // if any of them failed.
 func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	t := time.Now()
+
+	// a mirror given more than once is updated once.
+	mirrors = slices.Compact(slices.Sorted(slices.Values(mirrors)))
 
 	var mu sync.Mutex
 	var failed []string

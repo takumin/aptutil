@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -252,5 +253,80 @@ func TestCacherGetSupersededWhileDownloading(t *testing.T) {
 	c.fiLock.RUnlock()
 	if hasOld || !hasNew {
 		t.Errorf("items listed: old = %v, new = %v, want only the new one", hasOld, hasNew)
+	}
+}
+
+// TestCacherGetByHashStale tests that a by-hash path referring to an
+// index listed in a stale Release is served without retrying forever,
+// while InRelease lists the updated index.
+func TestCacherGetByHashStale(t *testing.T) {
+	t.Parallel()
+
+	const (
+		release   = "dists/noble/Release"
+		inRelease = "dists/noble/InRelease"
+		packages  = "dists/noble/main/binary-amd64/Packages"
+	)
+	makeRelease := func(pkgs []byte) []byte {
+		return []byte(fmt.Sprintf("Acquire-By-Hash: yes\nSHA256:\n %s %d main/binary-amd64/Packages\n",
+			sha256Hex(pkgs), len(pkgs)))
+	}
+	oldPackages := []byte("Package: a\nFilename: pool/a.deb\nSize: 3\nSHA256: " + sha256Hex([]byte("old")) + "\n")
+	newPackages := []byte("Package: b\nFilename: pool/b.deb\nSize: 3\nSHA256: " + sha256Hex([]byte("new")) + "\n")
+	oldByHash := "dists/noble/main/binary-amd64/by-hash/SHA256/" + sha256Hex(oldPackages)
+
+	tr := newTestRepo()
+	tr.set(release, makeRelease(oldPackages))
+	tr.set(inRelease, makeRelease(newPackages))
+	tr.set(oldByHash, oldPackages)
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	for _, p := range []string{release, inRelease} {
+		if status, _ := getData(t, c, "ubuntu/"+p); status != http.StatusOK {
+			t.Fatalf("status of %s = %d", p, status)
+		}
+	}
+
+	type result struct {
+		status int
+		data   string
+	}
+	done := make(chan result, 1)
+	go func() {
+		status, data := getData(t, c, "ubuntu/"+oldByHash)
+		done <- result{status, data}
+	}()
+
+	select {
+	case r := <-done:
+		if r.status != http.StatusOK || r.data != string(oldPackages) {
+			t.Errorf("Get = %d, %q, want the old Packages", r.status, r.data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get did not return")
+	}
+	if n := tr.hits(oldByHash); n != 1 {
+		t.Errorf("by-hash was downloaded %d times, want 1", n)
+	}
+
+	// the stale index does not replace the updated one.
+	newFI, err := makeFileInfo("ubuntu/"+packages, newPackages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.fiLock.RLock()
+	fi := c.info["ubuntu/"+packages]
+	_, hasOld := c.info["ubuntu/pool/a.deb"]
+	c.fiLock.RUnlock()
+	if fi == nil || !fi.Same(newFI) {
+		t.Fatalf("info of Packages = %v, want the updated one", fi)
+	}
+	if hasOld {
+		t.Error("items listed in the stale Packages were registered")
+	}
+	if _, err := c.meta.Lookup(fi); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Lookup of the updated Packages = %v, want ErrNotFound", err)
 	}
 }

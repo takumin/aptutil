@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] While Release and InRelease listed different versions of an
+  index, e.g. until both were checked for updates, a request for the
+  by-hash path of the version no longer current made the cacher
+  download it from the upstream over and over until the client gave
+  up.  It is now served without being cached.
 - [mirror] A goroutine was left waiting forever when an update was
   canceled or failed while starting to reuse items.
 - [mirror] With `Acquire-By-Hash: yes`, an index whose data did not

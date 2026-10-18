@@ -612,9 +612,11 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		c.fiLock.RLock()
 		cur := c.info[dest]
 		c.fiLock.RUnlock()
+		// Get looks up a by-hash path with the same valid again, so
+		// only a download of dest itself is worth retrying.
 		switch {
 		case cur != nil && cur.Same(fi):
-		case cur != nil && !cur.Same(valid):
+		case p == dest && cur != nil && !cur.Same(valid):
 			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
 				"path": dest,
 			})
@@ -667,6 +669,19 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 	// items listed in it.  Get retries with the new checksums.
 	if c.refs[dest] > 0 {
 		if cur := c.info[dest]; cur != nil && !cur.Same(fi) {
+			if p != dest {
+				// A by-hash path still refers to the stale item
+				// while the meta data file listing it is cached, and
+				// Get would retry with it forever.  Hand the item
+				// over to the waiters in Get without caching it.
+				log.Warn("serving a stale item without caching it", map[string]interface{}{
+					"path": p,
+				})
+				t.uncached = tempfile.Name()
+				keepTempfile = true
+				statusCode = http.StatusOK
+				return
+			}
 			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
 				"path": dest,
 			})

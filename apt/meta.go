@@ -155,7 +155,13 @@ func getFilesFromRelease(p string, r io.Reader) ([]*FileInfo, Paragraph, error) 
 	sha256sums := d["SHA256"]
 
 	if len(md5sums) == 0 && len(sha1sums) == 0 && len(sha256sums) == 0 {
-		return nil, nil, errors.New("no checksum in " + p)
+		// Release files of components and Index files of PDiffs list
+		// no files with these fields.  Files listed only with other
+		// checksums, such as SHA512, cannot be validated.
+		if len(d["SHA512"]) > 0 {
+			return nil, nil, errors.New("no supported checksum in " + p)
+		}
+		return nil, d, nil
 	}
 
 	m := make(map[string]*FileInfo)

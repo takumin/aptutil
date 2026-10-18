@@ -746,3 +746,41 @@ func TestExtractFileInfoNoChecksum(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractFileInfoListingNothing(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		p    string
+		data string
+	}{
+		{
+			name: "Release of a component",
+			p:    "ubuntu/dists/testing/main/binary-amd64/Release",
+			data: "Archive: testing\nComponent: main\nArchitecture: amd64\n",
+		},
+		{
+			name: "Index of PDiffs",
+			p:    "ubuntu/dists/testing/main/binary-amd64/Packages.diff/Index",
+			data: "SHA256-Current: 0123 3\nSHA256-History:\n 4567 3 2026-10-18-0000.00\n",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fil, d, err := ExtractFileInfo(tc.p, strings.NewReader(tc.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fil) != 0 {
+				t.Errorf("ExtractFileInfo listed %d files, want none", len(fil))
+			}
+			if d == nil {
+				t.Error("ExtractFileInfo returned no paragraph")
+			}
+		})
+	}
+}

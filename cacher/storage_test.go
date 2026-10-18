@@ -375,6 +375,12 @@ func TestStorageLoadRemovesTempFiles(t *testing.T) {
 	}
 	_ = f.Close()
 
+	// a link left by Insert interrupted.
+	link := filepath.Join(dir, linkTempName)
+	if err := os.WriteFile(link, []byte("link"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// items whose names begin with the prefix are not temporary files.
 	items := []string{"_tmpitem", filepath.Join("ubuntu", "_tmpitem")}
 	for _, p := range items {
@@ -393,6 +399,9 @@ func TestStorageLoadRemovesTempFiles(t *testing.T) {
 
 	if _, err := os.Stat(f.Name()); !os.IsNotExist(err) {
 		t.Errorf("temporary file is not removed: %v", err)
+	}
+	if _, err := os.Stat(link); !os.IsNotExist(err) {
+		t.Errorf("temporary link is not removed: %v", err)
 	}
 	if l := cm.ListAll(); len(l) != len(items) {
 		t.Errorf("len(ListAll()) = %d, want %d", len(l), len(items))
@@ -550,5 +559,79 @@ func TestStorageFileRemovedBySomeoneElse(t *testing.T) {
 				t.Errorf("the item is not forgotten: used = %d, lru = %d", cm.used, len(cm.lru))
 			}
 		})
+	}
+}
+
+func TestStorageInsertFailureKeepsExisting(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := newTestStorage(t, dir, 0)
+
+	fi, err := insert(cm, []byte("old"), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// linking a missing file fails.
+	newfi, err := makeFileInfo("a", []byte("new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.Insert(filepath.Join(dir, "missing"), newfi); err == nil {
+		t.Fatal("Insert must fail for a missing file")
+	}
+
+	f, err := cm.Lookup(fi)
+	if err != nil {
+		t.Fatalf("the existing item is lost: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old" {
+		t.Errorf("data = %q, want %q", data, "old")
+	}
+	if cm.used != fi.Size() || cm.Len() != 1 {
+		t.Errorf("used = %d, Len() = %d", cm.used, cm.Len())
+	}
+	if _, err := os.Stat(filepath.Join(dir, linkTempName)); !os.IsNotExist(err) {
+		t.Errorf("temporary link is left: %v", err)
+	}
+}
+
+func TestStorageInsertReplaces(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := newTestStorage(t, dir, 0)
+
+	if _, err := insert(cm, []byte("old"), "a"); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := insert(cm, []byte("newer"), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := cm.Lookup(fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "newer" {
+		t.Errorf("data = %q, want %q", data, "newer")
+	}
+	if cm.used != fi.Size() || cm.Len() != 1 {
+		t.Errorf("used = %d, Len() = %d", cm.used, cm.Len())
+	}
+	if _, err := os.Stat(filepath.Join(dir, linkTempName)); !os.IsNotExist(err) {
+		t.Errorf("temporary link is left: %v", err)
 	}
 }

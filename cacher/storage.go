@@ -18,6 +18,10 @@ const (
 
 	// tempPrefix is the prefix of temporary files created by TempFile.
 	tempPrefix = "_tmp"
+
+	// linkTempName is the temporary name of a link created by Insert.
+	// It has tempPrefix so that Load removes it if left by a crash.
+	linkTempName = tempPrefix + ".link"
 )
 
 var (
@@ -253,16 +257,24 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
+	// Link the file to a temporary name and rename it over destpath, so
+	// that the existing item is kept if linking fails.  Otherwise, the
+	// existing item would be removed while its FileInfo is still used
+	// by Cacher to validate the item downloaded again.
+	tmppath := filepath.Join(cm.dir, linkTempName)
+	_ = os.Remove(tmppath)
+	err = os.Link(filename, tmppath)
+	if err != nil {
+		return err
+	}
+	err = os.Rename(tmppath, destpath) //nolint:gosec // G703: p is validated to stay within cm.dir
+	// rename does nothing if both are links to the same file.
+	_ = os.Remove(tmppath)
+	if err != nil {
+		return err
+	}
+
 	if existing, ok := cm.cache[p]; ok {
-		err = os.Remove(destpath) //nolint:gosec // G703: p is validated to stay within cm.dir
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return err
-			}
-			log.Warn("cache file was removed already", map[string]interface{}{
-				"path": p,
-			})
-		}
 		cm.used -= existing.Size()
 		heap.Remove(cm, existing.index)
 		delete(cm.cache, p)
@@ -271,11 +283,6 @@ func (cm *Storage) Insert(filename string, fi *apt.FileInfo) error {
 				"path": p,
 			})
 		}
-	}
-
-	err = os.Link(filename, destpath)
-	if err != nil {
-		return err
 	}
 
 	e := &entry{

@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
   again.
 
 ### Fixed
+- [cacher] When a cached item failed to be replaced by the one
+  downloaded again, the cached item was removed first, while the cacher
+  kept validating downloads against it; e.g. Release was answered with
+  502 until it was checked for updates next time.  The cached item is
+  now replaced atomically, and kept if the replacement fails.
 - Field names in Release, Packages and Sources were case-sensitive,
   and e.g. a Packages file listing checksums only with `MD5Sum` instead
   of `MD5sum` was rejected for having no checksum.  They are now

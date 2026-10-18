@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] When a Release file was updated while downloading an index
+  listed in it, the index was validated only against the checksums in
+  the previous Release, and failed with 502 even if it matched the
+  updated one.  The 502 was then returned to every client for
+  `cache_period`.  The index is now validated against the updated
+  checksums, or downloaded again with them.
 - After failing to store a downloaded item locally, e.g. for a full
   disk, the rest of the item was still downloaded and discarded before
   reporting the failure.  Now at most 64 KiB of the rest is read.

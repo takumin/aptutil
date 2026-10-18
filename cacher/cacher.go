@@ -606,10 +606,26 @@ func (c *Cacher) download(ctx context.Context, p, dest string, u *url.URL, valid
 		return
 	}
 	if valid != nil && !valid.Same(fi) {
-		log.Warn("downloaded data is not valid", map[string]interface{}{
-			"url": u.String(),
-		})
-		return
+		// A meta data file may have been updated while downloading,
+		// and now list dest with the checksums of the downloaded data,
+		// or with others that Get should retry with.
+		c.fiLock.RLock()
+		cur := c.info[dest]
+		c.fiLock.RUnlock()
+		switch {
+		case cur != nil && cur.Same(fi):
+		case cur != nil && !cur.Same(valid):
+			log.Warn("discarded an item superseded while downloading", map[string]interface{}{
+				"path": dest,
+			})
+			statusCode = http.StatusOK
+			return
+		default:
+			log.Warn("downloaded data is not valid", map[string]interface{}{
+				"url": u.String(),
+			})
+			return
+		}
 	}
 
 	var fil []*apt.FileInfo

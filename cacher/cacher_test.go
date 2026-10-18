@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -524,5 +525,95 @@ func TestCacherGetLocalFailureStopsDownload(t *testing.T) {
 	}
 	if n := sent.Load(); n > total/4 {
 		t.Errorf("upstream sent %d MiB of %d MiB after a local failure", n>>20, total>>20)
+	}
+}
+
+func TestCacherGetReleaseUpdatedWhileDownloading(t *testing.T) {
+	t.Parallel()
+
+	const (
+		release  = "dists/noble/Release"
+		packages = "dists/noble/main/binary-amd64/Packages"
+	)
+	makePackages := func(name string) []byte {
+		data := "deb data of " + name
+		return fmt.Appendf(nil, "Package: %s\nFilename: pool/%s.deb\nSize: %d\nSHA256: %s\n",
+			name, name, len(data), sha256Hex([]byte(data)))
+	}
+	makeRelease := func(pkgs []byte) []byte {
+		return fmt.Appendf(nil, "SHA256:\n %s %d main/binary-amd64/Packages\n",
+			sha256Hex(pkgs), len(pkgs))
+	}
+	oldPackages := makePackages("old")
+	newPackages := makePackages("new")
+
+	testCases := []struct {
+		name string
+		// served is the data served for the download of Packages that
+		// started before Release is updated.
+		served []byte
+	}{
+		{
+			name:   "matching the updated Release",
+			served: newPackages,
+		},
+		{
+			name:   "matching neither",
+			served: []byte("broken"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := newTestRepo()
+			tr.set(release, makeRelease(oldPackages))
+			tr.set(packages, oldPackages)
+
+			started := make(chan struct{})
+			unblock := make(chan struct{})
+			var blocked atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/"+packages && blocked.CompareAndSwap(false, true) {
+					close(started)
+					<-unblock
+					_, _ = w.Write(tc.served)
+					return
+				}
+				tr.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+
+			c := newTestCacher(t, srv.URL)
+			if status, _ := getData(t, c, "ubuntu/"+release); status != http.StatusOK {
+				t.Fatalf("status of Release = %d", status)
+			}
+
+			type result struct {
+				status int
+				data   string
+			}
+			done := make(chan result, 1)
+			go func() {
+				status, data := getData(t, c, "ubuntu/"+packages)
+				done <- result{status, data}
+			}()
+
+			<-started
+			tr.set(release, makeRelease(newPackages))
+			tr.set(packages, newPackages)
+			<-c.Download("ubuntu/"+release, nil)
+			close(unblock)
+
+			select {
+			case r := <-done:
+				if r.status != http.StatusOK || r.data != string(newPackages) {
+					t.Errorf("Get = %d, %q, want the updated Packages", r.status, r.data)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("Get did not return")
+			}
+		})
 	}
 }

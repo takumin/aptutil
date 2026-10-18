@@ -993,36 +993,44 @@ func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 		return nil
 	})
 
-	var wg sync.WaitGroup
-	for range reuseWorkers {
-		wg.Add(1)
-		env.Go(func(ctx context.Context) error {
-			defer wg.Done()
-			for fi := range items {
-				localfi, err := m.reuse(fi, byhash)
-				if err != nil {
-					return err
-				}
-				if localfi != nil {
-					mu.Lock()
-					reused = append(reused, localfi)
-					mu.Unlock()
-					processed.Add(1)
-					continue
-				}
-				select {
-				case missing <- fi:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+	reuseItems := func(ctx context.Context) error {
+		for fi := range items {
+			localfi, err := m.reuse(fi, byhash)
+			if err != nil {
+				return err
 			}
-			return nil
-		})
+			if localfi != nil {
+				mu.Lock()
+				reused = append(reused, localfi)
+				mu.Unlock()
+				processed.Add(1)
+				continue
+			}
+			select {
+			case missing <- fi:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
 	}
-	go func() {
+	// The workers are started together in a goroutine of env, which
+	// closes missing after all of them finish.  env.Go does not start
+	// a function once env is canceled, so counting the workers started
+	// separately by env.Go would wait forever for those not started.
+	env.Go(func(ctx context.Context) error {
+		defer close(missing)
+		var wg sync.WaitGroup
+		for range reuseWorkers {
+			wg.Go(func() {
+				if err := reuseItems(ctx); err != nil {
+					env.Cancel(err)
+				}
+			})
+		}
 		wg.Wait()
-		close(missing)
-	}()
+		return nil
+	})
 
 	env.Go(func(ctx context.Context) error {
 		for fi := range missing {

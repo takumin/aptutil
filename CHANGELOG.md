@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] A goroutine was left waiting forever when an update was
+  canceled or failed while starting to reuse items.
 - [mirror] With `Acquire-By-Hash: yes`, an index whose data did not
   match Release and whose by-hash paths were not found was treated as
   missing, and the mirror was published without it.  The update now

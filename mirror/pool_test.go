@@ -10,10 +10,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cybozu-go/aptutil/apt"
 )
 
 // flatRepo returns the files of a flat repository whose Packages lists
@@ -189,5 +192,40 @@ func TestMirrorUpdateRedownloadsMissingFile(t *testing.T) {
 	}
 	if n := hits.Load(); n != 2 {
 		t.Errorf("a.deb was downloaded %d times, want 2", n)
+	}
+}
+
+// TestReuseOrDownloadCanceled is not run in parallel to count goroutines
+// left by reuseOrDownload.
+func TestReuseOrDownloadCanceled(t *testing.T) {
+	m := newTestMirror(t, "http://example.com")
+	fil := []*apt.FileInfo{apt.MakeFileInfoNoChecksum("a", 1)}
+
+	// workers may not be started for the canceled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 1000 {
+		results := make(chan *dlResult, 1)
+		if _, err := m.reuseOrDownload(ctx, fil, false, results); err == nil {
+			t.Fatal("reuseOrDownload must fail for the canceled context")
+		}
+	}
+
+	left := func() int {
+		buf := make([]byte, 1<<22)
+		n := 0
+		for _, g := range strings.Split(string(buf[:runtime.Stack(buf, true)]), "\n\n") {
+			if strings.Contains(g, "reuseOrDownload") {
+				n++
+			}
+		}
+		return n
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for left() > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines of reuseOrDownload are left", left())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

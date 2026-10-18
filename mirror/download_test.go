@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cybozu-go/aptutil/apt"
 )
 
 func newTestMirror(t *testing.T, upstream string) *Mirror {
@@ -402,5 +405,85 @@ func TestMirrorDownloadLocalFailureStopsDownload(t *testing.T) {
 	}
 	if n := sent.Load(); n > total/4 {
 		t.Errorf("upstream sent %d MiB of %d MiB after a local failure", n>>20, total>>20)
+	}
+}
+
+// TestMirrorDownloadFilesReuseFailure tests that a failure to reuse an
+// item cancels downloads in progress instead of waiting for them.
+func TestMirrorDownloadFilesReuseFailure(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Length", "1")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(10 * time.Second):
+		}
+		_, _ = w.Write([]byte("a"))
+	}))
+	defer srv.Close()
+
+	m := newTestMirror(t, srv.URL)
+	cur, err := NewStorage(t.TempDir(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := func(p string) *apt.FileInfo {
+		fi, err := makeFileInfo(p, []byte(p))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := cur.TempFile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := cur.StoreLink(fi, f.Name()); err != nil {
+			t.Fatal(err)
+		}
+		return fi
+	}
+	fa, err := makeFileInfo("y/a.deb", []byte("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// items reused successfully delay the failure to reuse x/b.deb so
+	// that the download of y/a.deb starts before it.
+	fil := []*apt.FileInfo{fa}
+	for i := range 1000 {
+		fil = append(fil, store(fmt.Sprintf("z/%d.deb", i)))
+	}
+	fil = append(fil, store("x/b.deb"))
+	m.current = cur
+	m.semaphore = nil
+
+	// a regular file at the directory of x/b.deb makes reusing it fail.
+	if err := os.MkdirAll(filepath.Join(m.storage.Dir(), "test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(m.storage.Dir(), "test", "x"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	_, err = m.downloadFiles(context.Background(), fil, false, false)
+	if err == nil || !strings.Contains(err.Error(), "storeLink") {
+		t.Fatalf("downloadFiles = %v, want the failure to reuse", err)
+	}
+	if hits.Load() == 0 {
+		t.Skip("the download did not start before the failure")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("downloadFiles returned after %v", d)
 	}
 }

@@ -902,20 +902,25 @@ func (m *Mirror) downloadFiles(ctx context.Context,
 ) ([]*apt.FileInfo, error) {
 	results := make(chan *dlResult, len(fil))
 	var reused, downloaded []*apt.FileInfo
+	var reuseErr, recvErr error
 
 	env := well.NewEnvironment(ctx)
 	env.Go(func(ctx context.Context) error {
-		var err error
-		reused, err = m.reuseOrDownload(ctx, fil, byhash, results)
-		return err
+		reused, reuseErr = m.reuseOrDownload(ctx, fil, byhash, results)
+		return reuseErr
 	})
 	env.Go(func(ctx context.Context) error {
-		var err error
-		downloaded, err = m.recvResult(allowMissing, byhash, results)
-		return err
+		downloaded, recvErr = m.recvResult(allowMissing, byhash, results)
+		return recvErr
 	})
 	env.Stop()
-	err := env.Wait()
+	_ = env.Wait()
+	// a failure of either side cancels the other, so report the cause
+	// rather than the cancellation.
+	err := reuseErr
+	if err == nil || (errors.Is(err, context.Canceled) && recvErr != nil) {
+		err = recvErr
+	}
 	// remove temporary files of the results left by recvResult failed.
 	// results is closed after all downloads finish.  See reuseOrDownload.
 	for r := range results {
@@ -1075,6 +1080,8 @@ func (m *Mirror) reuseOrDownload(ctx context.Context, fil []*apt.FileInfo,
 
 	env.Stop()
 	if err := env.Wait(); err != nil {
+		// downloads in progress are of no use, so do not wait for them.
+		dlEnv.Cancel(err)
 		return nil, err
 	}
 	return reused, nil

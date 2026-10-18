@@ -55,6 +55,12 @@ func updateMirrors(ctx context.Context, c *Config, mirrors []string) error {
 	}
 
 	var ml []*Mirror
+	// close mirrors whose Update is not started for ctx canceled.
+	defer func() {
+		for _, m := range ml {
+			m.Close()
+		}
+	}()
 	for _, id := range mirrors {
 		m, err := NewMirror(t, id, c)
 		if err != nil {

@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -310,5 +312,49 @@ func TestMirrorConflictingItems(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+// TestMirrorMissingIndexForbidden tests that an index is treated as
+// missing if the server returns 403 for it, as Amazon S3 does.
+func TestMirrorMissingIndexForbidden(t *testing.T) {
+	t.Parallel()
+
+	packages := "Package: a\nFilename: a.deb\nSize: 1\nSHA256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n"
+	packagesGz := gzipped(t, packages)
+	files := map[string]string{
+		"Release":     releaseOf(map[string]string{"Packages": packages, "Packages.gz": packagesGz}),
+		"Release.gpg": "dummy",
+		"Packages.gz": packagesGz,
+		"a.deb":       "a",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
+		if !ok {
+			http.Error(w, "Access Denied", http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(data))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewConfig()
+	c.Dir = t.TempDir()
+	c.Mirrors = map[string]*MirrConfig{
+		"test": {URL: tomlURL{u}, Suites: []string{"/"}},
+	}
+	m, err := NewMirror(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "test", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Update(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "test", "a.deb")); err != nil {
+		t.Error(err)
 	}
 }

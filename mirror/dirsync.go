@@ -15,6 +15,7 @@ func DirSync(d string) error {
 	}
 	err = f.Sync()
 	if err != nil {
+		_ = f.Close()
 		return err
 	}
 	return f.Close()

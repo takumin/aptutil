@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] A directory was left open when fsync(2) on it failed.
+- [cacher] Once a cached file was removed by someone else, requests
+  for the item were answered with 500 until it was evicted or the
+  cacher restarted.  The item is now forgotten and downloaded again.
+- [cacher] With `cache_period = 0`, a request for an item that the
+  upstream failed to serve, e.g. with 404, made the cacher download it
+  over and over, as the failure was forgotten before the request looked
+  it up.  The request now receives the result of the download it
+  waited for.  A negative `cache_period` is now rejected as invalid.
+- [mirror] An index listed in Release but missing, such as uncompressed
+  Packages listed in Ubuntu Release, failed the update on a server that
+  returns 403 for missing files, such as Amazon S3, while it was
+  allowed to be missing on a server returning 404.  403 is now treated
+  as missing for indices, as it is for Release files.
+- [cacher] While Release and InRelease listed different versions of an
+  index, e.g. until both were checked for updates, a request for the
+  by-hash path of the version no longer current made the cacher
+  download it from the upstream over and over until the client gave
+  up.  It is now served without being cached.
 - [mirror] A goroutine was left waiting forever when an update was
   canceled or failed while starting to reuse items.
 - [mirror] With `Acquire-By-Hash: yes`, an index whose data did not
@@ -31,7 +50,7 @@ All notable changes to this project will be documented in this file.
   now rejected as invalid.
 - Packages listing an item without MD5sum, SHA1 nor SHA256 were
   accepted, and the item was validated only by its size.  Release files
-  without MD5Sum, SHA1 nor SHA256 were accepted as listing no indices,
+  listing indices only with SHA512 were accepted as listing no indices,
   and the mirror published the suite without them.  They are now
   rejected as invalid, as Sources are.
 - [mirror] A mirror could be published with files whose write-back

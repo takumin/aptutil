@@ -46,8 +46,12 @@ func TestCacheHandlerHidesInternalErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// removing the loaded file makes Storage.Lookup fail.
+	// replacing the loaded file with a directory makes Storage.Lookup
+	// fail to read it.
 	if err := os.Remove(fp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(fp, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := makeFileInfo(p, []byte("a"))

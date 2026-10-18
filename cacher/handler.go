@@ -46,8 +46,20 @@ func (c cacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// http.StatusOK
 	defer func() { _ = f.Close() }()
+	// set Content-Type so that ServeContent does not sniff it from the
+	// content; HEAD does not have the content to do so.
+	w.Header().Set("Content-Type", contentType(p))
 	var zeroTime time.Time
 	http.ServeContent(w, r, path.Base(p), zeroTime, f)
+}
+
+// contentType returns Content-Type of the item at p.
+func contentType(p string) string {
+	ct := mime.TypeByExtension(path.Ext(p))
+	if ct == "" {
+		return "application/octet-stream"
+	}
+	return ct
 }
 
 // serveHead responds to a HEAD request without downloading the item.
@@ -58,11 +70,9 @@ func (c cacheHandler) serveHead(w http.ResponseWriter, r *http.Request, p string
 	}
 
 	// http.StatusOK
-	ct := mime.TypeByExtension(path.Ext(p))
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ct)
+	// the same headers as GET responds with by http.ServeContent.
+	w.Header().Set("Content-Type", contentType(p))
+	w.Header().Set("Accept-Ranges", "bytes")
 	if size >= 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	}

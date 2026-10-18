@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] HEAD responded with Content-Type and Accept-Ranges different
+  from GET, e.g. `application/octet-stream` for Release, for which GET
+  sniffed `text/plain`.  GET now uses the Content-Type of HEAD, and
+  HEAD responds with Accept-Ranges as GET does.
 - [cacher] An item loaded at startup that was evicted while its
   checksums were calculated was answered with 500 instead of being
   downloaded again.

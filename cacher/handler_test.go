@@ -117,3 +117,30 @@ func TestCacheHandlerHead(t *testing.T) {
 		t.Errorf("cached items = %d, want 1", n)
 	}
 }
+
+func TestCacheHandlerHeadHeadersMatchGet(t *testing.T) {
+	t.Parallel()
+
+	tr := newTestRepo()
+	tr.set("dists/noble/Release", []byte("Origin: test\n"))
+	tr.set("pool/a.deb", []byte("aaaa"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+
+	for _, p := range []string{"/ubuntu/dists/noble/Release", "/ubuntu/pool/a.deb"} {
+		get := httptest.NewRecorder()
+		cacheHandler{c}.ServeHTTP(get, httptest.NewRequest(http.MethodGet, p, nil))
+		head := httptest.NewRecorder()
+		cacheHandler{c}.ServeHTTP(head, httptest.NewRequest(http.MethodHead, p, nil))
+		if get.Code != http.StatusOK || head.Code != http.StatusOK {
+			t.Fatalf("%s: GET = %d, HEAD = %d", p, get.Code, head.Code)
+		}
+		for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges"} {
+			if g, h2 := get.Header().Get(h), head.Header().Get(h); g != h2 {
+				t.Errorf("%s: %s of GET = %q, HEAD = %q", p, h, g, h2)
+			}
+		}
+	}
+}

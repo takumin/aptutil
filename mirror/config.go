@@ -77,6 +77,16 @@ func (mc *MirrConfig) Check() error {
 		}
 	}
 
+	// suites sharing Release files would store them twice and fail.
+	releases := make(map[string]bool)
+	for _, suite := range mc.Suites {
+		r := mc.ReleaseFiles(suite)[0]
+		if releases[r] {
+			return errors.New("duplicate suite: " + suite)
+		}
+		releases[r] = true
+	}
+
 	return nil
 }
 

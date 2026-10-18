@@ -218,6 +218,26 @@ func TestMirrorConfigNoURL(t *testing.T) {
 	}
 }
 
+func TestMirrorConfigDuplicateSuites(t *testing.T) {
+	t.Parallel()
+
+	for _, suites := range []string{
+		`["stable", "stable"]`,
+		`["stable", "stable/."]`,
+		`["/", "/"]`,
+		`["12.04/", "./12.04/"]`,
+	} {
+		var mc MirrConfig
+		_, err := toml.Decode(`url = "http://example.com/"`+"\nsuites = "+suites, &mc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := mc.Check(); err == nil {
+			t.Errorf("Check must fail with suites %s", suites)
+		}
+	}
+}
+
 func TestMatchingIndexSectionBoundary(t *testing.T) {
 	t.Parallel()
 

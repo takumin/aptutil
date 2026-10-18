@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [mirror] A directory was left open when fsync(2) on it failed.
 - [cacher] Once a cached file was removed by someone else, requests
   for the item were answered with 500 until it was evicted or the
   cacher restarted.  The item is now forgotten and downloaded again.

@@ -335,6 +335,10 @@ func (cm *Storage) Lookup(fi *apt.FileInfo) (*os.File, error) {
 		if cm.cache[p] != e {
 			continue
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			cm.forget(e)
+			return nil, ErrNotFound
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -359,10 +363,30 @@ func (cm *Storage) open(fi *apt.FileInfo, e *entry) (*os.File, error) {
 // touchAndOpen marks e as recently used, and opens its file.
 // cm.mu lock must be acquired beforehand.
 func (cm *Storage) touchAndOpen(e *entry) (*os.File, error) {
+	f, err := os.Open(filepath.Join(cm.dir, e.FilePath()))
+	if errors.Is(err, os.ErrNotExist) {
+		cm.forget(e)
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 	e.atime = cm.lclock
 	cm.lclock++
 	heap.Fix(cm, e.index)
-	return os.Open(filepath.Join(cm.dir, e.FilePath()))
+	return f, nil
+}
+
+// forget removes e whose file has been removed by someone else, so that
+// the item is downloaded again instead of failing to open it forever.
+// cm.mu lock must be acquired beforehand.
+func (cm *Storage) forget(e *entry) {
+	log.Warn("cache file was removed by someone else", map[string]interface{}{
+		"path": e.Path(),
+	})
+	cm.used -= e.Size()
+	heap.Remove(cm, e.index)
+	delete(cm.cache, e.Path())
 }
 
 // Open opens the item at p without checking its checksums.

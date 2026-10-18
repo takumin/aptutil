@@ -487,3 +487,68 @@ func TestStorageLookupRemovedWhileCalculatingChecksums(t *testing.T) {
 		t.Errorf("Lookup = %v, want ErrNotFound", err)
 	}
 }
+
+// TestStorageFileRemovedBySomeoneElse tests that an item whose file is
+// removed by someone else is forgotten instead of failing to be opened.
+func TestStorageFileRemovedBySomeoneElse(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("data")
+	fi, err := makeFileInfo("a", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name   string
+		loaded bool
+		open   func(cm *Storage) (*os.File, error)
+	}{
+		{
+			name:   "Lookup of an item loaded",
+			loaded: true,
+			open:   func(cm *Storage) (*os.File, error) { return cm.Lookup(fi) },
+		},
+		{
+			name: "Lookup of an item inserted",
+			open: func(cm *Storage) (*os.File, error) { return cm.Lookup(fi) },
+		},
+		{
+			name:   "Open",
+			loaded: true,
+			open:   func(cm *Storage) (*os.File, error) { return cm.Open("a") },
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			cm := newTestStorage(t, dir, 0)
+			if tc.loaded {
+				if err := os.WriteFile(filepath.Join(dir, "a"+fileSuffix), data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := cm.Load(); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := insert(cm, data, "a"); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Remove(filepath.Join(dir, "a"+fileSuffix)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tc.open(cm); !errors.Is(err, ErrNotFound) {
+				t.Errorf("err = %v, want ErrNotFound", err)
+			}
+
+			cm.mu.Lock()
+			defer cm.mu.Unlock()
+			if _, ok := cm.cache["a"]; ok || cm.used != 0 || len(cm.lru) != 0 {
+				t.Errorf("the item is not forgotten: used = %d, lru = %d", cm.used, len(cm.lru))
+			}
+		})
+	}
+}

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Fixed
+- [cacher] Once a cached file was removed by someone else, requests
+  for the item were answered with 500 until it was evicted or the
+  cacher restarted.  The item is now forgotten and downloaded again.
 - [cacher] With `cache_period = 0`, a request for an item that the
   upstream failed to serve, e.g. with 404, made the cacher download it
   over and over, as the failure was forgotten before the request looked

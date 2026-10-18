@@ -53,6 +53,7 @@ func TestCacherGetChecksumMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.info[p] = fi
+	c.refs[p] = 1
 
 	type result struct {
 		status int
@@ -829,5 +830,34 @@ func TestCacherGetReleaseUpdatedWhileDownloading(t *testing.T) {
 				t.Fatal("Get did not return")
 			}
 		})
+	}
+}
+
+// TestCacherGetReleaseRemoved tests that Release removed from meta_dir
+// is downloaded again even if it has been updated upstream.
+func TestCacherGetReleaseRemoved(t *testing.T) {
+	t.Parallel()
+
+	const release = "dists/noble/Release"
+
+	tr := newTestRepo()
+	tr.set(release, []byte("Codename: noble\n"))
+	srv := httptest.NewServer(tr)
+	defer srv.Close()
+
+	c := newTestCacher(t, srv.URL)
+	if status, _ := getData(t, c, "ubuntu/"+release); status != http.StatusOK {
+		t.Fatalf("status of Release = %d", status)
+	}
+
+	if err := c.meta.Delete("ubuntu/" + release); err != nil {
+		t.Fatal(err)
+	}
+	const updated = "Codename: noble\nSuite: noble\n"
+	tr.set(release, []byte(updated))
+
+	status, data := getData(t, c, "ubuntu/"+release)
+	if status != http.StatusOK || data != updated {
+		t.Errorf("Get = %d, %q, want the updated Release", status, data)
 	}
 }

@@ -78,13 +78,8 @@ func (fi *FileInfo) Size() uint64 {
 	return fi.size
 }
 
-// HasChecksum returns true if fi has checksums.
+// HasChecksum returns true if fi has any checksum to validate data.
 func (fi *FileInfo) HasChecksum() bool {
-	return fi.md5sum != nil
-}
-
-// hasAnyChecksum returns true if fi has any checksum to validate data.
-func (fi *FileInfo) hasAnyChecksum() bool {
 	return fi.md5sum != nil || fi.sha1sum != nil || fi.sha256sum != nil || fi.sha512sum != nil
 }
 

@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [1.6.0] - 2026-10-20
 ### Added
 - [mirror] The by-hash files of the indices in the previous mirror are
   kept in the new one for one generation.  Before, a client that had
@@ -330,7 +332,8 @@ All notable changes to this project will be documented in this file.
 [well]: https://github.com/cybozu-go/well
 [cmd]: https://github.com/cybozu-go/cmd
 [spec]: https://github.com/cybozu-go/cmd/blob/master/README.md#specifications
-[Unreleased]: https://github.com/takumin/aptutil/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/takumin/aptutil/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/takumin/aptutil/compare/v1.5.3...v1.6.0
 [1.5.3]: https://github.com/takumin/aptutil/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/takumin/aptutil/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/takumin/aptutil/compare/v1.5.0...v1.5.1

@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/cybozu-go/netutil v1.4.12 // indirect
+	github.com/cybozu-go/netutil v1.4.13 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/onsi/gomega v1.44.0 // indirect
